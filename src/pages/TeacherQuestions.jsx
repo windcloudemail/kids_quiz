@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Plus,
+  Upload,
   ChevronDown,
   Search,
   SearchX,
@@ -14,6 +15,7 @@ import { SUBJECTS, SUBJECT_LIST } from '../lib/subjects.js'
 import TeacherShell from '../components/TeacherShell.jsx'
 import SubjectTag from '../components/SubjectTag.jsx'
 import Stars from '../components/Stars.jsx'
+import BulkUploadModal from '../components/BulkUploadModal.jsx'
 
 function accuracyColor(acc) {
   if (acc >= 75) return '#3B8A7C'
@@ -45,6 +47,7 @@ export default function TeacherQuestions() {
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [showBulk, setShowBulk] = useState(false)
 
   const reload = async () => {
     setBusy(true)
@@ -90,20 +93,35 @@ export default function TeacherQuestions() {
               我的題目
             </h1>
           </div>
-          <button
-            onClick={() => setEditing({ mode: 'add', data: EMPTY_FORM })}
-            className="inline-flex items-center gap-2 rounded-bubble font-medium"
-            style={{
-              background: '#1A1A1A',
-              color: '#fff',
-              fontSize: 14,
-              padding: '10px 16px',
-              minHeight: 40,
-            }}
-          >
-            <Plus size={16} strokeWidth={2.25} />
-            新增題目
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBulk(true)}
+              className="inline-flex items-center gap-2 rounded-bubble font-medium bg-card border border-line"
+              style={{
+                fontSize: 14,
+                padding: '10px 14px',
+                minHeight: 40,
+                color: '#1A1A1A',
+              }}
+            >
+              <Upload size={15} strokeWidth={2} />
+              批量上傳
+            </button>
+            <button
+              onClick={() => setEditing({ mode: 'add', data: EMPTY_FORM })}
+              className="inline-flex items-center gap-2 rounded-bubble font-medium"
+              style={{
+                background: '#1A1A1A',
+                color: '#fff',
+                fontSize: 14,
+                padding: '10px 16px',
+                minHeight: 40,
+              }}
+            >
+              <Plus size={16} strokeWidth={2.25} />
+              新增題目
+            </button>
+          </div>
         </div>
 
         {/* Filter bar */}
@@ -187,6 +205,16 @@ export default function TeacherQuestions() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
+            reload()
+          }}
+        />
+      )}
+
+      {showBulk && (
+        <BulkUploadModal
+          onClose={() => setShowBulk(false)}
+          onSaved={() => {
+            setShowBulk(false)
             reload()
           }}
         />
