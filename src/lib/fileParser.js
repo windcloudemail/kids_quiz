@@ -533,7 +533,9 @@ async function parseAnswerCSV(file) {
 
 async function parseAnswerXLSX(file) {
   const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { type: 'array' })
+  // SheetJS type:'array' expects a Uint8Array, not a raw ArrayBuffer —
+  // passing the ArrayBuffer directly hangs the renderer in some builds.
+  const wb = XLSX.read(new Uint8Array(buf), { type: 'array' })
   for (const name of wb.SheetNames) {
     const sheet = wb.Sheets[name]
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
