@@ -259,6 +259,27 @@ function QuestionRow({ row, canEdit, onEdit, onDelete }) {
       className="bg-card rounded-card border border-line shadow-card p-4 flex items-start gap-4"
       style={{ transition: 'border-color 0.15s ease' }}
     >
+      {row.image_url && (
+        <a
+          href={row.image_url}
+          target="_blank"
+          rel="noreferrer"
+          className="shrink-0 rounded-bubble overflow-hidden"
+          style={{
+            width: 80,
+            height: 80,
+            border: '1px solid var(--line)',
+            background: '#FAFAF8',
+          }}
+        >
+          <img
+            src={row.image_url}
+            alt="題目預覽"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            loading="lazy"
+          />
+        </a>
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center flex-wrap gap-2 mb-2.5">
           {row.source_number ? (

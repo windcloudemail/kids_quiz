@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS questions (
   option_d         TEXT NOT NULL,
   answer           TEXT NOT NULL,
   explanation      TEXT,
+  image_url        TEXT,
   used_count       INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_teacher_id) REFERENCES teachers(id)

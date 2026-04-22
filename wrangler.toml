@@ -14,3 +14,8 @@ ALLOWED_TEACHER_EMAILS = "windcloudemail@gmail.com"
 binding       = "DB"
 database_name = "kids-quiz-db"
 database_id   = "ae99b639-005b-4b29-ad45-d81a36b7b6af"
+
+# R2 object storage for question images extracted from PDFs.
+[[r2_buckets]]
+binding     = "MEDIA"
+bucket_name = "kids-quiz-media"

@@ -208,26 +208,175 @@ function buildFromHeaderRow(headerMap, cells) {
 // =============================================================
 // PDF
 // =============================================================
+//
+// parsePDF renders each page to a hi-DPI canvas AND collects per-line text
+// with its PDF-space y coordinate. It first tries extractTrailingMarkerStyle
+// on the rich lines (so each question carries a {pageIndex, yStart, yEnd}
+// slice); if that yields fewer questions than the leading-marker style, we
+// fall back to leading style without images. Images are always JPEG q=0.85
+// to keep R2 storage small (PNG would bloat 3-5×).
 
 async function parsePDF(file) {
   const buf = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: buf, useSystemFonts: true }).promise
-  let fullText = ''
+
+  const pages = []
+  const richLines = []
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
+    const viewport = page.getViewport({ scale: 2 })
+    const canvas = document.createElement('canvas')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    const ctx = canvas.getContext('2d', { alpha: false })
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({ canvasContext: ctx, viewport }).promise
+    pages.push({ canvas, viewport, pageIndex: i - 1 })
+
     const content = await page.getTextContent()
+    let curText = ''
+    let curY = null
     let lastY = null
-    let pageText = ''
     for (const item of content.items) {
       if (!item.str) continue
       const y = item.transform[5]
-      if (lastY !== null && Math.abs(lastY - y) > 2) pageText += '\n'
-      pageText += item.str
+      if (lastY !== null && Math.abs(lastY - y) > 2) {
+        if (curText) richLines.push({ text: curText, y: curY, pageIndex: i - 1 })
+        curText = ''
+        curY = null
+      }
+      if (!curText) curY = y
+      curText += item.str
       lastY = y
     }
-    fullText += pageText + '\n\n'
+    if (curText) richLines.push({ text: curText, y: curY, pageIndex: i - 1 })
   }
-  return extractQuestions(fullText)
+
+  const rawText = richLines.map((l) => l.text).join('\n')
+
+  const withLoc = extractTrailingMarkerStyleWithLoc(richLines)
+  const plain = extractLeadingMarkerStyle(rawText)
+
+  if (withLoc.length > plain.length) {
+    return attachImagesToQuestions(withLoc, pages)
+  }
+  return plain
+}
+
+function extractTrailingMarkerStyleWithLoc(richLines) {
+  const out = []
+  let current = null
+  let optBuffer = ''
+  const options = { 1: null, 2: null, 3: null, 4: null }
+  let nextExpected = 1
+  let collectingQuestion = true
+
+  const flush = (nextStartLoc) => {
+    if (!current) return
+    const [o1, o2, o3, o4] = [options[1], options[2], options[3], options[4]]
+    if (current.question && o1 && o2 && o3 && o4) {
+      let yEnd = null
+      if (
+        nextStartLoc &&
+        nextStartLoc.pageIndex === current._loc.pageIndex
+      ) {
+        yEnd = nextStartLoc.y
+      }
+      current._loc.yEnd = yEnd
+      out.push({
+        source_number: current.n,
+        question: current.question.trim(),
+        option_a: o1,
+        option_b: o2,
+        option_c: o3,
+        option_d: o4,
+        answer: '',
+        explanation: '',
+        _loc: current._loc,
+      })
+    }
+    current = null
+    options[1] = options[2] = options[3] = options[4] = null
+    nextExpected = 1
+    collectingQuestion = true
+    optBuffer = ''
+  }
+
+  for (const line of richLines) {
+    if (/請繼續作答/.test(line.text)) continue
+
+    const qStart = line.text.match(/^(\d+)\.\s*(.*)$/)
+    if (qStart) {
+      flush({ pageIndex: line.pageIndex, y: line.y })
+      current = {
+        n: parseInt(qStart[1], 10),
+        question: qStart[2] || '',
+        _loc: { pageIndex: line.pageIndex, yStart: line.y, yEnd: null },
+      }
+      collectingQuestion = true
+      continue
+    }
+
+    if (!current) continue
+
+    const trailing = line.text.match(/^(.*?)\s*([1-4])\s*$/)
+    if (trailing) {
+      const marker = parseInt(trailing[2], 10)
+      const optText = (optBuffer + ' ' + (trailing[1] || '')).trim()
+      if (marker === nextExpected && optText.length > 0) {
+        options[marker] = optText
+        nextExpected++
+        optBuffer = ''
+        collectingQuestion = false
+        continue
+      }
+    }
+
+    if (collectingQuestion) {
+      current.question = (current.question + ' ' + line.text).trim()
+    } else {
+      optBuffer = (optBuffer + ' ' + line.text).trim()
+    }
+  }
+  flush(null)
+  return out
+}
+
+function attachImagesToQuestions(questions, pages) {
+  for (const q of questions) {
+    const loc = q._loc
+    delete q._loc
+    if (!loc) continue
+    const page = pages[loc.pageIndex]
+    if (!page) continue
+    const { canvas, viewport } = page
+    const scale = viewport.scale
+    const h = viewport.height
+
+    // PDF y is bottom-up, canvas y is top-down.
+    // Text y is the baseline of the line, so top-of-line ≈ y + font size (~12pt).
+    // Add a small padding around the crop so we don't clip glyphs.
+    const padTop = 18
+    const padBottom = 12
+    const topPx = Math.max(0, Math.floor(h - loc.yStart * scale) - padTop)
+    const bottomPx =
+      loc.yEnd != null
+        ? Math.min(h, Math.ceil(h - loc.yEnd * scale) + padBottom)
+        : h
+    const sliceH = bottomPx - topPx
+    if (sliceH < 40) continue
+
+    const slice = document.createElement('canvas')
+    slice.width = canvas.width
+    slice.height = sliceH
+    const sctx = slice.getContext('2d', { alpha: false })
+    sctx.fillStyle = '#fff'
+    sctx.fillRect(0, 0, slice.width, slice.height)
+    sctx.drawImage(canvas, 0, topPx, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+    q.image_data_url = slice.toDataURL('image/jpeg', 0.85)
+  }
+  return questions
 }
 
 // =============================================================

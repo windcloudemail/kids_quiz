@@ -6,8 +6,8 @@ const VALID_ANSWERS = ['A', 'B', 'C', 'D']
 
 const INSERT_SQL = `INSERT INTO questions
   (owner_teacher_id, source_number, subject, grade, unit, difficulty, question, zhuyin,
-   option_a, option_b, option_c, option_d, answer, explanation)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+   option_a, option_b, option_c, option_d, answer, explanation, image_url)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 export async function onRequestPost({ request, env, data }) {
   if (!data.session || data.session.type !== 'teacher') {
@@ -69,7 +69,8 @@ export async function onRequestPost({ request, env, data }) {
         q.option_c,
         q.option_d,
         String(q.answer).toUpperCase(),
-        q.explanation || null
+        q.explanation || null,
+        q.image_url || null
       )
     )
     try {

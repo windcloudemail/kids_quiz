@@ -14,6 +14,7 @@ const EDITABLE = [
   'option_d',
   'answer',
   'explanation',
+  'image_url',
 ]
 
 export async function onRequestPatch({ request, env, data, params }) {

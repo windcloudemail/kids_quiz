@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS questions (
   option_d         TEXT NOT NULL,
   answer           TEXT NOT NULL,            -- 'A' | 'B' | 'C' | 'D'
   explanation      TEXT,
+  image_url        TEXT,                     -- R2 key path (/api/media/...) for question image
   used_count       INTEGER NOT NULL DEFAULT 0,  -- denormalised for list perf
   created_at       TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_teacher_id) REFERENCES teachers(id)

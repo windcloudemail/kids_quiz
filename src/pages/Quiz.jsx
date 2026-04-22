@@ -144,7 +144,18 @@ export default function Quiz() {
                 {q.grade} 年級 · {q.unit || '練習'}
               </span>
             </div>
-            {q.zhuyin?.length ? (
+            {q.image_url ? (
+              <img
+                src={q.image_url}
+                alt={`第 ${idx + 1} 題`}
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  borderRadius: 8,
+                  border: '1px solid var(--line-soft)',
+                }}
+              />
+            ) : q.zhuyin?.length ? (
               <RubyText chars={q.zhuyin} />
             ) : (
               <p style={{ fontSize: 18, lineHeight: 1.6, margin: 0 }}>{q.question}</p>

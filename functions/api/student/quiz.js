@@ -9,7 +9,7 @@ export async function onRequestGet({ request, env, data }) {
   if (!SUBJECT_LIST.includes(subject)) return error('subject 不正確', 400)
 
   const rows = await env.DB.prepare(
-    `SELECT id, subject, grade, unit, difficulty, question, zhuyin,
+    `SELECT id, subject, grade, unit, difficulty, question, zhuyin, image_url,
             option_a, option_b, option_c, option_d, answer, explanation
      FROM questions WHERE subject = ? ORDER BY RANDOM() LIMIT ?`
   )
@@ -24,6 +24,7 @@ export async function onRequestGet({ request, env, data }) {
     difficulty: q.difficulty,
     question: q.question,
     zhuyin: q.zhuyin ? safeParse(q.zhuyin) : null,
+    image_url: q.image_url || null,
     options: [
       { label: 'A', text: q.option_a },
       { label: 'B', text: q.option_b },

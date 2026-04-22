@@ -50,6 +50,7 @@ export default function BulkUploadModal({ onClose, onSaved }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [result, setResult] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 })
 
   const revalidate = (list, d = defaults) => {
     const withDefaults = list.map((q) => ({
@@ -109,14 +110,40 @@ export default function BulkUploadModal({ onClose, onSaved }) {
     setBusy(true)
     setErr(null)
     try {
+      // Step 1: upload every image_data_url to R2 and replace with image_url.
+      const withImages = v.valid.filter((q) => q.image_data_url).length
+      setUploadProgress({ done: 0, total: withImages })
+      const prepared = []
+      let done = 0
+      for (const q of v.valid) {
+        if (q.image_data_url) {
+          const comma = q.image_data_url.indexOf(',')
+          const header = q.image_data_url.slice(0, comma)
+          const b64 = q.image_data_url.slice(comma + 1)
+          const ct = (header.match(/data:(.*?);/) || [])[1] || 'image/jpeg'
+          const ext = (ct.split('/')[1] || 'jpg').split(';')[0]
+          const res = await api.post('/api/teacher/images', {
+            filename: `q${q.source_number ?? done + 1}.${ext}`,
+            content_type: ct,
+            data: b64,
+          })
+          done++
+          setUploadProgress({ done, total: withImages })
+          prepared.push({ ...q, image_url: res.url, image_data_url: undefined })
+        } else {
+          prepared.push(q)
+        }
+      }
+      // Step 2: bulk insert with image_url set.
       const res = await api.post('/api/teacher/questions/bulk', {
-        questions: v.valid,
+        questions: prepared.map(({ image_data_url, ...rest }) => rest),
       })
       setResult(res)
     } catch (e) {
       setErr('上傳失敗: ' + e.message)
     } finally {
       setBusy(false)
+      setUploadProgress({ done: 0, total: 0 })
     }
   }
 
@@ -389,7 +416,11 @@ export default function BulkUploadModal({ onClose, onSaved }) {
                   fontSize: 13,
                 }}
               >
-                {busy ? '上傳中…' : `確認上傳 ${validCount} 題`}
+                {busy
+                  ? uploadProgress.total > 0
+                    ? `上傳圖片 ${uploadProgress.done}/${uploadProgress.total}…`
+                    : '寫入中…'
+                  : `確認上傳 ${validCount} 題`}
               </button>
             </div>
           </div>

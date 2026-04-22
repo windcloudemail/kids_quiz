@@ -9,7 +9,7 @@ export async function onRequestGet({ request, env, data }) {
   const difficulty = url.searchParams.get('difficulty')
   const q = url.searchParams.get('q')
 
-  let sql = `SELECT id, owner_teacher_id, source_number, subject, grade, unit, difficulty, question, used_count,
+  let sql = `SELECT id, owner_teacher_id, source_number, subject, grade, unit, difficulty, question, image_url, used_count,
                     (SELECT CASE WHEN COUNT(*) > 0
                             THEN ROUND(SUM(sa.correct) * 100.0 / COUNT(*))
                             ELSE 0 END
@@ -73,8 +73,8 @@ export async function onRequestPost({ request, env, data }) {
   const result = await env.DB.prepare(
     `INSERT INTO questions
      (owner_teacher_id, source_number, subject, grade, unit, difficulty, question, zhuyin,
-      option_a, option_b, option_c, option_d, answer, explanation)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      option_a, option_b, option_c, option_d, answer, explanation, image_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       teacherId,
@@ -96,7 +96,8 @@ export async function onRequestPost({ request, env, data }) {
       body.option_c,
       body.option_d,
       body.answer,
-      body.explanation || null
+      body.explanation || null,
+      body.image_url || null
     )
     .run()
   return json({ id: result.meta.last_row_id })
