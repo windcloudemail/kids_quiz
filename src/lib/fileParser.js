@@ -231,17 +231,19 @@ function extractQuestions(rawText) {
     if (!current || !current._raw) return
     let body = current._raw.trim()
 
-    // explanation
-    const expMatch = body.match(/【?(?:解說|解析|說明)】?[:：\s]*(.*?)$/is)
+    // explanation — accept 解說 / 解析 / 說明 / Explanation / Explain
+    const expMatch = body.match(
+      /【?(?:解說|解析|說明|Explanation|Explain)】?[:：\s]*([\s\S]*?)$/i
+    )
     if (expMatch) {
       current.explanation = expMatch[1].trim()
       body = body.substring(0, expMatch.index).trim()
     }
 
-    // answer (either from inline "answer:" tag or keep from line-start match)
+    // answer — accept 答案 / 解答 / Ans / Answer
     if (!current._answerLetter) {
       const ansMatch = body.match(
-        /【?(?:答案|解答|Ans)】?[:：\s]*(?:\(|（|)?([1-4A-D])(?:\)|）|)?/i
+        /【?(?:答案|解答|Answer|Ans)】?[:：\s]*(?:\(|（|)?([1-4A-D])(?:\)|）|)?/i
       )
       if (ansMatch) {
         current._answerLetter = toLetter(ansMatch[1])
