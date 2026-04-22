@@ -1,17 +1,20 @@
 // Parse teacher-uploaded question files into normalised question objects.
-// Ported from insurance_quiz/src/lib/fileParser.js. Supports:
+// Supports:
 //   .json   — array of objects matching the DB question shape
 //   .docx   — Word tables (preferred) or plain text fallback
 //   .pdf    — pdfjs-dist extracts text by y-coordinates, then plain-text parse
 //   image/* — tesseract.js OCR (chi_tra), then plain-text parse
 //
-// Normalisation converts insurance-style shapes (option_1..4, answer 1-4,
-// category) into the kids-quiz DB shape (option_a..d, answer A-D, subject).
+// Separate entry parseAnswerFile() parses answer sheets (.xlsx / .json / .csv)
+// into a Map<sourceNumber, 'A'|'B'|'C'|'D'> so the caller can merge answers
+// into questions whose source didn't include the answer (e.g. Taiwan
+// official exam question booklets).
 
 import mammoth from 'mammoth'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import Tesseract from 'tesseract.js'
+import * as XLSX from 'xlsx'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -24,7 +27,7 @@ const SUBJECT_MAP = {
 const CHINESE_NUMS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
 
 // =============================================================
-// Entry point
+// Entry point — question file
 // =============================================================
 
 export async function parseFile(file) {
@@ -46,14 +49,53 @@ export async function parseFile(file) {
   } else if (type.startsWith('image/')) {
     rows = await parseImage(file)
   } else {
-    throw new Error(`不支援的檔案格式(${type || '.' + name.split('.').pop()});支援 .json / .docx / .pdf / 圖片`)
+    throw new Error(`不支援的檔案格式(${type || '.' + name.split('.').pop()})`)
   }
 
   return { questions: rows.map((r) => normalize(r, subjectHint, gradeHint)) }
 }
 
 // =============================================================
-// JSON
+// Entry point — answer file
+// =============================================================
+
+export async function parseAnswerFile(file) {
+  const name = (file.name || '').toLowerCase()
+  const type = file.type || ''
+  if (name.endsWith('.json') || type === 'application/json') {
+    return parseAnswerJSON(file)
+  }
+  if (
+    name.endsWith('.xlsx') ||
+    name.endsWith('.xls') ||
+    type.includes('spreadsheet') ||
+    type.includes('excel')
+  ) {
+    return parseAnswerXLSX(file)
+  }
+  if (name.endsWith('.csv') || type === 'text/csv') {
+    return parseAnswerCSV(file)
+  }
+  throw new Error(`答案檔格式不支援(${type || name.split('.').pop()})`)
+}
+
+export function mergeAnswers(questions, answerMap) {
+  if (!answerMap || answerMap.size === 0) return { merged: questions, hit: 0 }
+  let hit = 0
+  const merged = questions.map((q, i) => {
+    const key = q.source_number ?? i + 1
+    const ans = answerMap.get(Number(key))
+    if (ans && !q.answer) {
+      hit++
+      return { ...q, answer: ans }
+    }
+    return q
+  })
+  return { merged, hit }
+}
+
+// =============================================================
+// JSON questions
 // =============================================================
 
 async function parseJSON(file) {
@@ -164,12 +206,12 @@ function buildFromHeaderRow(headerMap, cells) {
 }
 
 // =============================================================
-// PDF — extract text with line breaks by y-coordinate, then extractQuestions
+// PDF
 // =============================================================
 
 async function parsePDF(file) {
   const buf = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument(buf).promise
+  const pdf = await pdfjsLib.getDocument({ data: buf, useSystemFonts: true }).promise
   let fullText = ''
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
@@ -189,19 +231,13 @@ async function parsePDF(file) {
 }
 
 // =============================================================
-// Image OCR — tesseract.js chi_tra, then extractQuestions
+// Image OCR
 // =============================================================
 
 async function parseImage(file) {
   const {
     data: { text },
-  } = await Tesseract.recognize(file, 'chi_tra', {
-    logger: (m) => {
-      if (m?.status === 'recognizing text' && typeof m.progress === 'number') {
-        // swallow — caller can wire a progress UI later
-      }
-    },
-  })
+  } = await Tesseract.recognize(file, 'chi_tra')
   const cleaned = text
     .replace(/[ \t\r]+/g, (match, offset, str) => {
       const prev = str[offset - 1]
@@ -215,11 +251,18 @@ async function parseImage(file) {
 }
 
 // =============================================================
-// Plain-text extractQuestions — ported near-verbatim from insurance_quiz,
-// but outputs A-D answers instead of 1-4
+// extractQuestions — tries two plain-text layouts, keeps the more productive
 // =============================================================
 
 function extractQuestions(rawText) {
+  const aStyle = extractLeadingMarkerStyle(rawText)
+  const bStyle = extractTrailingMarkerStyle(rawText)
+  return bStyle.length > aStyle.length ? bStyle : aStyle
+}
+
+// A. Leading-marker layout (insurance_quiz style):
+//    "1. question text (A) opt1 (B) opt2 (C) opt3 (D) opt4  答案: B"
+function extractLeadingMarkerStyle(rawText) {
   const lines = rawText
     .split('\n')
     .map((l) => l.trim())
@@ -231,7 +274,6 @@ function extractQuestions(rawText) {
     if (!current || !current._raw) return
     let body = current._raw.trim()
 
-    // explanation — accept 解說 / 解析 / 說明 / Explanation / Explain
     const expMatch = body.match(
       /【?(?:解說|解析|說明|Explanation|Explain)】?[:：\s]*([\s\S]*?)$/i
     )
@@ -240,7 +282,6 @@ function extractQuestions(rawText) {
       body = body.substring(0, expMatch.index).trim()
     }
 
-    // answer — accept 答案 / 解答 / Ans / Answer
     if (!current._answerLetter) {
       const ansMatch = body.match(
         /【?(?:答案|解答|Answer|Ans)】?[:：\s]*(?:\(|（|)?([1-4A-D])(?:\)|）|)?/i
@@ -251,8 +292,7 @@ function extractQuestions(rawText) {
       }
     }
 
-    // options
-    const opts = extractOptions(body)
+    const opts = extractLeadingOptions(body)
     if (opts) {
       current.question = [opts.q, opts.qp2].filter(Boolean).join(' ').trim()
       current.option_a = opts.o1
@@ -263,15 +303,13 @@ function extractQuestions(rawText) {
       current.question = body
     }
 
-    // finalise
     current.answer = current._answerLetter || ''
     if (
       current.question &&
       current.option_a &&
       current.option_b &&
       current.option_c &&
-      current.option_d &&
-      /^[ABCD]$/.test(current.answer)
+      current.option_d
     ) {
       delete current._raw
       delete current._answerLetter
@@ -281,10 +319,8 @@ function extractQuestions(rawText) {
 
   for (const line of lines) {
     if (line.replace(/\s/g, '').includes('題號答案')) continue
-
     const newFmt = line.match(/^(\d+)\s+([1-4A-D])(?:\s+(.*))?$/i)
     const oldFmt = line.match(/^(\d+)[\.、]\s*(.*)$/)
-
     let qText = null
     let ansLetter = null
     if (newFmt) {
@@ -293,12 +329,12 @@ function extractQuestions(rawText) {
     } else if (oldFmt) {
       qText = oldFmt[2] || ''
     }
-
     if (qText !== null) {
       flush()
       current = {
         _raw: qText,
         _answerLetter: ansLetter,
+        source_number: newFmt ? parseInt(newFmt[1], 10) : parseInt(oldFmt[1], 10),
         question: '',
         option_a: '',
         option_b: '',
@@ -315,16 +351,15 @@ function extractQuestions(rawText) {
   return out
 }
 
-function extractOptions(text) {
+function extractLeadingOptions(text) {
   const markersList = [
     ['(1)', '(2)', '(3)', '(4)'],
     ['(A)', '(B)', '(C)', '(D)'],
-    ['(1)', '(2)', '(3)', '(4)'],
-    ['(A)', '(B)', '(C)', '(D)'],
+    ['（1）', '（2）', '（3）', '（4）'],
+    ['（A）', '（B）', '（C）', '（D）'],
     ['①', '②', '③', '④'],
     ['A.', 'B.', 'C.', 'D.'],
     ['A、', 'B、', 'C、', 'D、'],
-    ['A', 'B', 'C', 'D'],
   ]
   for (const m of markersList) {
     const i1 = text.indexOf(m[0])
@@ -335,10 +370,6 @@ function extractOptions(text) {
     if (i3 === -1) continue
     const i4 = text.indexOf(m[3], i3 + m[2].length)
     if (i4 === -1) continue
-
-    // Guard: full-width A may be inside ()
-    if (m[0] === 'A' && i1 > 0 && /[(（]/.test(text[i1 - 1])) continue
-
     const tail = text.substring(i4 + m[3].length)
     const enders = ['。', '？', '！']
     let endIdx = tail.length
@@ -346,7 +377,7 @@ function extractOptions(text) {
       const idx = tail.indexOf(e)
       if (idx > 0 && idx < endIdx) endIdx = idx
     }
-    let o4 = tail.substring(0, endIdx).trim()
+    const o4 = tail.substring(0, endIdx).trim()
     const qp2 = tail
       .substring(endIdx)
       .replace(/^[。,,、;;:：?!!\s]+/, '')
@@ -363,12 +394,192 @@ function extractOptions(text) {
   return null
 }
 
+// B. Trailing-marker layout (Taiwan official exam booklet style):
+//    "1. question text..."
+//    "option-1 text 1"
+//    "option-2 text 2"
+//    "option-3 text 3"
+//    "option-4 text 4"
+// Each option line ends with its marker number 1..4. No answer in booklet.
+function extractTrailingMarkerStyle(rawText) {
+  const lines = rawText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+
+  const out = []
+  let current = null
+  let optBuffer = ''
+  const options = { 1: null, 2: null, 3: null, 4: null }
+  let nextExpected = 1
+  let collectingQuestion = true
+
+  const flush = () => {
+    if (!current) return
+    const [o1, o2, o3, o4] = [options[1], options[2], options[3], options[4]]
+    if (current.question && o1 && o2 && o3 && o4) {
+      out.push({
+        source_number: current.n,
+        question: current.question.trim(),
+        option_a: o1,
+        option_b: o2,
+        option_c: o3,
+        option_d: o4,
+        answer: '',
+        explanation: '',
+      })
+    }
+    current = null
+    options[1] = options[2] = options[3] = options[4] = null
+    nextExpected = 1
+    collectingQuestion = true
+    optBuffer = ''
+  }
+
+  for (const line of lines) {
+    if (/請繼續作答/.test(line)) continue
+
+    const qStart = line.match(/^(\d+)\.\s*(.*)$/)
+    if (qStart) {
+      flush()
+      current = { n: parseInt(qStart[1], 10), question: qStart[2] || '' }
+      collectingQuestion = true
+      continue
+    }
+
+    if (!current) continue
+
+    const trailing = line.match(/^(.*?)\s*([1-4])\s*$/)
+    if (trailing) {
+      const marker = parseInt(trailing[2], 10)
+      const optText = (optBuffer + ' ' + (trailing[1] || '')).trim()
+      if (marker === nextExpected && optText.length > 0) {
+        options[marker] = optText
+        nextExpected++
+        optBuffer = ''
+        collectingQuestion = false
+        continue
+      }
+    }
+
+    if (collectingQuestion) {
+      current.question = (current.question + ' ' + line).trim()
+    } else {
+      optBuffer = (optBuffer + ' ' + line).trim()
+    }
+  }
+  flush()
+  return out
+}
+
 function toLetter(v) {
   if (!v) return null
   const s = String(v).toUpperCase()
   if (/^[ABCD]$/.test(s)) return s
   if (/^[1-4]$/.test(s)) return 'ABCD'[parseInt(s, 10) - 1]
   return null
+}
+
+// =============================================================
+// Answer files (xlsx / json / csv)
+// =============================================================
+
+async function parseAnswerJSON(file) {
+  const text = await file.text()
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch (e) {
+    throw new Error('答案 JSON 格式有誤: ' + e.message)
+  }
+  const map = new Map()
+  // Accept any of:
+  //   [{q: 1, answer: "A"}, ...]
+  //   [{n: 1, a: "A"}, ...]
+  //   { "1": "A", "2": "B", ... }
+  //   [ "A","B","C",...]  (index+1 is the question number)
+  if (Array.isArray(data)) {
+    data.forEach((row, i) => {
+      if (typeof row === 'string' || typeof row === 'number') {
+        const ans = toLetter(row)
+        if (ans) map.set(i + 1, ans)
+        return
+      }
+      if (row && typeof row === 'object') {
+        const n = parseInt(row.q ?? row.n ?? row.number ?? row.source_number ?? i + 1, 10)
+        const a = toLetter(row.a ?? row.answer ?? row.ans)
+        if (n && a) map.set(n, a)
+      }
+    })
+  } else if (data && typeof data === 'object') {
+    for (const [k, v] of Object.entries(data)) {
+      const n = parseInt(k, 10)
+      const a = toLetter(v)
+      if (n && a) map.set(n, a)
+    }
+  }
+  return map
+}
+
+async function parseAnswerCSV(file) {
+  const text = await file.text()
+  const rows = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => l.split(/[,\t]/).map((c) => c.trim()))
+  return answerMapFromRows(rows)
+}
+
+async function parseAnswerXLSX(file) {
+  const buf = await file.arrayBuffer()
+  const wb = XLSX.read(buf, { type: 'array' })
+  for (const name of wb.SheetNames) {
+    const sheet = wb.Sheets[name]
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+    const map = answerMapFromRows(rows)
+    if (map.size > 0) return map
+  }
+  return new Map()
+}
+
+function answerMapFromRows(rows) {
+  if (!rows || rows.length === 0) return new Map()
+  const map = new Map()
+
+  // Strategy 1: wide format — header row has question numbers across columns,
+  // later rows have answers per question
+  const header = rows[0] || []
+  const numericCols = []
+  header.forEach((cell, col) => {
+    const n = parseInt(cell, 10)
+    if (!isNaN(n) && n >= 1 && n <= 999) numericCols.push({ col, n })
+  })
+  if (numericCols.length >= 3) {
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r] || []
+      const tentative = new Map()
+      for (const { col, n } of numericCols) {
+        const ans = toLetter(row[col])
+        if (ans) tentative.set(n, ans)
+      }
+      if (tentative.size > 0) {
+        for (const [n, a] of tentative) map.set(n, a)
+        if (map.size >= numericCols.length) return map
+      }
+    }
+    if (map.size > 0) return map
+  }
+
+  // Strategy 2: long format — first col is question number, second col is answer
+  for (const row of rows) {
+    if (!row || row.length < 2) continue
+    const n = parseInt(row[0], 10)
+    if (isNaN(n) || n < 1 || n > 999) continue
+    const a = toLetter(row[1])
+    if (a) map.set(n, a)
+  }
+  return map
 }
 
 // =============================================================
@@ -405,6 +616,7 @@ function normalize(raw, subjectHint, gradeHint) {
   const question = [questionMain, questionPart2].filter(Boolean).join(' ')
 
   return {
+    source_number: raw.source_number || null,
     subject,
     grade: parseInt(raw.grade, 10) || gradeHint || 0,
     unit: (raw.unit || '').trim() || null,
@@ -427,10 +639,10 @@ export function validateQuestions(list) {
     if (!q.question) reasons.push('題目空白')
     if (!q.option_a || !q.option_b || !q.option_c || !q.option_d)
       reasons.push('選項不齊')
-    if (!/^[ABCD]$/.test(q.answer)) reasons.push('答案需為 A/B/C/D')
+    if (!/^[ABCD]$/.test(q.answer)) reasons.push('缺答案(請補上答案檔或手動編輯)')
     if (!['chinese', 'math', 'english'].includes(q.subject))
-      reasons.push('科目 subject 必須是 chinese/math/english(或 國語/數學/英文,或於檔名標示)')
-    if (q.grade < 1 || q.grade > 6) reasons.push('年級需 1-6(可在檔名寫 X年級)')
+      reasons.push('科目空白(可手動挑或檔名含「國語/數學/英文」)')
+    if (q.grade < 1 || q.grade > 6) reasons.push('年級需 1-6')
     if (q.difficulty < 1 || q.difficulty > 5) reasons.push('難度需 1-5')
     if (reasons.length) errors.push({ index: i, reasons, question: q })
     else valid.push(q)
@@ -448,7 +660,7 @@ function detectSubjectFromName(name) {
 
 function detectGradeFromName(name) {
   if (!name) return null
-  const m = name.match(/([一二三四五六])年級|grade\s*([1-6])|g([1-6])|([1-6])\s*年級|([1-6])nd|([1-6])rd|([1-6])th/i)
+  const m = name.match(/([一二三四五六])年級|grade\s*([1-6])|g([1-6])|([1-6])\s*年級/i)
   if (!m) return null
   for (const cap of m.slice(1)) {
     if (!cap) continue

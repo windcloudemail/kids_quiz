@@ -1,6 +1,14 @@
 import { useState } from 'react'
-import { Upload, FileText, X, Download, CheckCircle2 } from 'lucide-react'
-import { parseFile, validateQuestions } from '../lib/fileParser.js'
+import {
+  Upload,
+  FileText,
+  X,
+  Download,
+  CheckCircle2,
+  ClipboardList,
+} from 'lucide-react'
+import { parseFile, parseAnswerFile, mergeAnswers, validateQuestions } from '../lib/fileParser.js'
+import { SUBJECTS, SUBJECT_LIST } from '../lib/subjects.js'
 import { api } from '../lib/api.js'
 
 const TEMPLATE = [
@@ -33,37 +41,76 @@ const TEMPLATE = [
 ]
 
 export default function BulkUploadModal({ onClose, onSaved }) {
-  const [parsed, setParsed] = useState(null)
+  const [questions, setQuestions] = useState(null) // parsed + merged array
+  const [errors, setErrors] = useState([]) // validation errors
+  const [questionFileName, setQuestionFileName] = useState('')
+  const [answerFileName, setAnswerFileName] = useState('')
+  const [answerHit, setAnswerHit] = useState(0)
+  const [defaults, setDefaults] = useState({ subject: '', grade: 0 })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [result, setResult] = useState(null)
-  const [fileName, setFileName] = useState('')
 
-  const handleFile = async (f) => {
+  const revalidate = (list, d = defaults) => {
+    const withDefaults = list.map((q) => ({
+      ...q,
+      subject: q.subject || d.subject,
+      grade: q.grade || d.grade,
+    }))
+    const v = validateQuestions(withDefaults)
+    setQuestions(withDefaults)
+    setErrors(v.errors)
+    return v
+  }
+
+  const handleQuestionFile = async (f) => {
     setErr(null)
-    setParsed(null)
     setResult(null)
-    setFileName(f.name)
+    setQuestionFileName(f.name)
+    setAnswerFileName('')
+    setAnswerHit(0)
     try {
-      const { questions } = await parseFile(f)
-      if (!questions.length) {
+      const { questions: raw } = await parseFile(f)
+      if (!raw.length) {
         setErr('檔案中沒有辨識到任何題目')
+        setQuestions(null)
         return
       }
-      const v = validateQuestions(questions)
-      setParsed(v)
+      revalidate(raw)
     } catch (e) {
       setErr('解析失敗: ' + e.message)
+      setQuestions(null)
     }
   }
 
+  const handleAnswerFile = async (f) => {
+    if (!questions) return
+    setErr(null)
+    setAnswerFileName(f.name)
+    try {
+      const map = await parseAnswerFile(f)
+      const { merged, hit } = mergeAnswers(questions, map)
+      setAnswerHit(hit)
+      revalidate(merged)
+    } catch (e) {
+      setErr('答案檔解析失敗: ' + e.message)
+    }
+  }
+
+  const updateDefault = (field, value) => {
+    const d = { ...defaults, [field]: value }
+    setDefaults(d)
+    if (questions) revalidate(questions, d)
+  }
+
   const submit = async () => {
-    if (!parsed?.valid?.length) return
+    const v = validateQuestions(questions || [])
+    if (!v.valid.length) return
     setBusy(true)
     setErr(null)
     try {
       const res = await api.post('/api/teacher/questions/bulk', {
-        questions: parsed.valid,
+        questions: v.valid,
       })
       setResult(res)
     } catch (e) {
@@ -84,6 +131,11 @@ export default function BulkUploadModal({ onClose, onSaved }) {
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  const validCount = questions ? questions.filter((_, i) => !errors.find(e => e.index === i)).length : 0
+  const needsAnswer = questions && questions.some((q) => !q.answer)
+  const needsSubject = questions && questions.some((q) => !q.subject)
+  const needsGrade = questions && questions.some((q) => !q.grade)
 
   return (
     <div
@@ -106,67 +158,66 @@ export default function BulkUploadModal({ onClose, onSaved }) {
           </button>
         </div>
 
-        {!parsed && !result && (
-          <>
-            <div
-              className="rounded-card p-8 flex flex-col items-center gap-3 text-center"
-              style={{ border: '2px dashed var(--line)' }}
+        {!questions && !result && (
+          <div
+            className="rounded-card p-8 flex flex-col items-center gap-3 text-center"
+            style={{ border: '2px dashed var(--line)' }}
+          >
+            <Upload size={32} className="text-ink-sub" />
+            <div className="text-[14px] text-ink">選擇題目檔</div>
+            <label
+              className="inline-flex items-center gap-2 rounded-bubble px-4 py-2 cursor-pointer text-[14px] font-medium"
+              style={{ background: '#1A1A1A', color: '#fff' }}
             >
-              <Upload size={32} className="text-ink-sub" />
-              <div className="text-[14px] text-ink">
-                上傳 .json / .docx / .pdf / 圖片
-              </div>
-              <label
-                className="inline-flex items-center gap-2 rounded-bubble px-4 py-2 cursor-pointer text-[14px] font-medium"
-                style={{ background: '#1A1A1A', color: '#fff' }}
-              >
-                <FileText size={14} />
-                選取檔案
-                <input
-                  type="file"
-                  accept=".docx,.json,.pdf,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                />
-              </label>
-              <button
-                onClick={downloadTemplate}
-                className="inline-flex items-center gap-1 text-[13px] text-ink-sub hover:text-ink"
-              >
-                <Download size={13} />
-                下載 JSON 範例
-              </button>
-              <div className="mt-2 text-[12px] text-ink-sub max-w-md leading-relaxed">
-                JSON 陣列最穩。docx 請用表格、pdf 走 pdfjs 抽文字、圖片走 tesseract OCR。
-                純文字解析會認以「1. 」「1、」「(1)(2)(3)(4)」或「(A)(B)(C)(D)」為序的題目。
-                科目 / 年級可寫在檔名(如「三年級國語.pdf」),否則從欄位或預設值抓。
-              </div>
-            </div>
+              <FileText size={14} />
+              選取檔案
+              <input
+                type="file"
+                accept=".docx,.json,.pdf,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && handleQuestionFile(e.target.files[0])}
+              />
+            </label>
+            <button
+              onClick={downloadTemplate}
+              className="inline-flex items-center gap-1 text-[12px] text-ink-sub hover:text-ink"
+            >
+              <Download size={12} />
+              下載 JSON 範例
+            </button>
             {err && (
-              <div className="mt-3 text-[13px]" style={{ color: '#D14343' }}>
+              <div className="mt-2 text-[13px]" style={{ color: '#D14343' }}>
                 {err}
               </div>
             )}
-          </>
+          </div>
         )}
 
-        {parsed && !result && (
-          <div>
-            <div className="flex items-baseline justify-between mb-3">
+        {questions && !result && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-baseline justify-between">
               <div className="text-[14px]">
-                <span className="text-ink-sub">{fileName}</span> · 解析出{' '}
-                <span className="font-semibold">{parsed.valid.length}</span> 題可用
-                {parsed.errors.length > 0 && (
+                <span className="text-ink-sub">{questionFileName}</span> · 抓到{' '}
+                <span className="font-semibold">{questions.length}</span> 題
+                {validCount !== questions.length && (
                   <span className="text-ink-sub">
-                    ,略過{' '}
-                    <span style={{ color: '#D14343' }}>{parsed.errors.length}</span> 題
+                    (
+                    <span style={{ color: '#3B8A7C' }}>{validCount} 可用</span>
+                    {' / '}
+                    <span style={{ color: '#D14343' }}>
+                      {questions.length - validCount} 待修
+                    </span>
+                    )
                   </span>
                 )}
               </div>
               <button
                 onClick={() => {
-                  setParsed(null)
-                  setFileName('')
+                  setQuestions(null)
+                  setQuestionFileName('')
+                  setAnswerFileName('')
+                  setAnswerHit(0)
+                  setErrors([])
                   setErr(null)
                 }}
                 className="text-[12px] text-ink-sub hover:text-ink"
@@ -175,45 +226,132 @@ export default function BulkUploadModal({ onClose, onSaved }) {
               </button>
             </div>
 
-            {parsed.valid.length > 0 && (
+            {/* Inline defaults for subject / grade when missing */}
+            {(needsSubject || needsGrade) && (
               <div
-                className="max-h-56 overflow-y-auto rounded-bubble p-3 text-[13px]"
-                style={{ border: '1px solid var(--line)' }}
+                className="rounded-bubble p-3 flex items-center gap-3 flex-wrap"
+                style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}
               >
-                {parsed.valid.slice(0, 10).map((q, i) => (
-                  <div key={i} className="mb-2 last:mb-0">
-                    <span
-                      className="font-mono mr-2 text-[11px]"
-                      style={{ color: '#666' }}
+                <span className="text-[13px] font-medium">補上:</span>
+                {needsSubject && (
+                  <label className="inline-flex items-center gap-1 text-[13px]">
+                    科目
+                    <select
+                      value={defaults.subject}
+                      onChange={(e) => updateDefault('subject', e.target.value)}
+                      className="rounded-chip bg-card text-ink px-2 py-1 text-[13px] border border-line"
                     >
-                      [{q.subject}·G{q.grade}·{q.answer}]
-                    </span>
-                    <span className="text-ink">{q.question}</span>
-                  </div>
-                ))}
-                {parsed.valid.length > 10 && (
-                  <div className="text-[12px] text-ink-sub mt-2">
-                    …還有 {parsed.valid.length - 10} 題
-                  </div>
+                      <option value="">—</option>
+                      {SUBJECT_LIST.map((s) => (
+                        <option key={s} value={s}>
+                          {SUBJECTS[s].name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {needsGrade && (
+                  <label className="inline-flex items-center gap-1 text-[13px]">
+                    年級
+                    <select
+                      value={defaults.grade || ''}
+                      onChange={(e) =>
+                        updateDefault('grade', parseInt(e.target.value, 10) || 0)
+                      }
+                      className="rounded-chip bg-card text-ink px-2 py-1 text-[13px] border border-line"
+                    >
+                      <option value="">—</option>
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <option key={n} value={n}>
+                          {n} 年級
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 )}
               </div>
             )}
 
-            {parsed.errors.length > 0 && (
-              <details className="mt-3 text-[13px]">
+            {/* Answer sheet slot — only show if any question lacks answer */}
+            {needsAnswer && (
+              <div
+                className="rounded-bubble p-3 flex items-center gap-3 flex-wrap"
+                style={{
+                  background: answerHit > 0 ? 'var(--subject-english-bg)' : 'var(--subject-chinese-bg)',
+                  border: `1px solid ${answerHit > 0 ? '#3B8A7C' : '#D14343'}`,
+                }}
+              >
+                <ClipboardList size={16} style={{ color: answerHit > 0 ? '#3B8A7C' : '#D14343' }} />
+                <div className="flex-1 text-[13px]">
+                  {answerHit > 0 ? (
+                    <span style={{ color: '#3B8A7C' }}>
+                      已從「{answerFileName}」比對到 {answerHit} 題答案
+                    </span>
+                  ) : (
+                    <span style={{ color: '#D14343' }}>
+                      題目缺答案。請上傳答案檔(xlsx / json / csv,格式見下方範例)
+                    </span>
+                  )}
+                </div>
+                <label
+                  className="inline-flex items-center gap-1 rounded-bubble px-3 py-1.5 cursor-pointer text-[13px] font-medium bg-card border border-line"
+                >
+                  <Upload size={13} />
+                  {answerFileName ? '重選答案檔' : '選取答案檔'}
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.json,.csv,application/json,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleAnswerFile(e.target.files[0])}
+                  />
+                </label>
+              </div>
+            )}
+
+            {/* Question preview */}
+            <div
+              className="rounded-bubble p-3 text-[13px] max-h-56 overflow-y-auto"
+              style={{ border: '1px solid var(--line)' }}
+            >
+              {questions.slice(0, 15).map((q, i) => {
+                const hasErr = errors.find((e) => e.index === i)
+                return (
+                  <div key={i} className="mb-1.5 last:mb-0 flex gap-2">
+                    <span
+                      className="font-mono text-[11px] shrink-0"
+                      style={{ color: hasErr ? '#D14343' : '#3B8A7C', minWidth: 60 }}
+                    >
+                      [{q.subject || '?'}·G{q.grade || '?'}·{q.answer || '?'}]
+                    </span>
+                    <span className="text-ink flex-1 truncate">{q.question}</span>
+                  </div>
+                )
+              })}
+              {questions.length > 15 && (
+                <div className="text-[12px] text-ink-sub mt-2">
+                  …還有 {questions.length - 15} 題
+                </div>
+              )}
+            </div>
+
+            {errors.length > 0 && (
+              <details className="text-[13px]">
                 <summary
                   className="cursor-pointer font-medium"
                   style={{ color: '#D14343' }}
                 >
-                  {parsed.errors.length} 題無效(展開看原因)
+                  {errors.length} 題需修正(展開看原因)
                 </summary>
                 <div
-                  className="mt-2 max-h-40 overflow-y-auto rounded-bubble p-3 text-[12px]"
+                  className="mt-2 max-h-32 overflow-y-auto rounded-bubble p-3 text-[12px]"
                   style={{ border: '1px solid var(--line)' }}
                 >
-                  {parsed.errors.slice(0, 30).map((e, i) => (
-                    <div key={i} className="mb-1">
-                      <span className="font-semibold" style={{ color: '#D14343' }}>
+                  {errors.slice(0, 30).map((e, i) => (
+                    <div key={i}>
+                      <span
+                        className="font-semibold"
+                        style={{ color: '#D14343' }}
+                      >
                         第 {e.index + 1} 題
                       </span>
                       <span className="text-ink-sub">
@@ -226,12 +364,12 @@ export default function BulkUploadModal({ onClose, onSaved }) {
             )}
 
             {err && (
-              <div className="mt-3 text-[13px]" style={{ color: '#D14343' }}>
+              <div className="text-[13px]" style={{ color: '#D14343' }}>
                 {err}
               </div>
             )}
 
-            <div className="mt-5 flex items-center justify-end gap-2">
+            <div className="flex items-center justify-end gap-2">
               <button
                 onClick={onClose}
                 className="rounded-btn font-medium text-ink-sub"
@@ -241,7 +379,7 @@ export default function BulkUploadModal({ onClose, onSaved }) {
               </button>
               <button
                 onClick={submit}
-                disabled={busy || !parsed.valid.length}
+                disabled={busy || validCount === 0}
                 className="rounded-btn font-medium disabled:opacity-60"
                 style={{
                   background: '#1A1A1A',
@@ -251,7 +389,7 @@ export default function BulkUploadModal({ onClose, onSaved }) {
                   fontSize: 13,
                 }}
               >
-                {busy ? '上傳中…' : `確認上傳 ${parsed.valid.length} 題`}
+                {busy ? '上傳中…' : `確認上傳 ${validCount} 題`}
               </button>
             </div>
           </div>
@@ -279,24 +417,11 @@ export default function BulkUploadModal({ onClose, onSaved }) {
                     className="mt-1 text-[13px]"
                     style={{ color: '#D14343' }}
                   >
-                    {result.errors.length} 筆寫入失敗,見下方錯誤清單。
+                    {result.errors.length} 筆寫入失敗
                   </div>
                 )}
               </div>
             </div>
-            {result.errors?.length > 0 && (
-              <div
-                className="mb-4 max-h-40 overflow-y-auto rounded-bubble p-3 text-[12px]"
-                style={{ border: '1px solid var(--line)' }}
-              >
-                {result.errors.map((e, i) => (
-                  <div key={i}>
-                    {e.reason}
-                    {typeof e.index === 'number' ? ` (第 ${e.index + 1} 題)` : ''}
-                  </div>
-                ))}
-              </div>
-            )}
             <div className="flex items-center justify-end">
               <button
                 onClick={onSaved}
