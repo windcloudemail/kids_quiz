@@ -1,6 +1,7 @@
 import { json, error } from '../../../lib/response.js'
 
 const EDITABLE = [
+  'source_number',
   'subject',
   'grade',
   'unit',

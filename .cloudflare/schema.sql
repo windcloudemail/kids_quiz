@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS class_students (
 CREATE TABLE IF NOT EXISTS questions (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   owner_teacher_id INTEGER NOT NULL,
+  source_number    INTEGER,                  -- 原題本題號 (nullable for manually added)
   subject          TEXT NOT NULL,            -- 'chinese' | 'math' | 'english'
   grade            INTEGER NOT NULL,         -- 1..6
   unit             TEXT,                     -- free-text topic/unit label

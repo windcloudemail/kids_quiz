@@ -5,9 +5,9 @@ const BATCH_SIZE = 50
 const VALID_ANSWERS = ['A', 'B', 'C', 'D']
 
 const INSERT_SQL = `INSERT INTO questions
-  (owner_teacher_id, subject, grade, unit, difficulty, question, zhuyin,
+  (owner_teacher_id, source_number, subject, grade, unit, difficulty, question, zhuyin,
    option_a, option_b, option_c, option_d, answer, explanation)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 export async function onRequestPost({ request, env, data }) {
   if (!data.session || data.session.type !== 'teacher') {
@@ -51,6 +51,9 @@ export async function onRequestPost({ request, env, data }) {
     const stmts = batch.map((q) =>
       env.DB.prepare(INSERT_SQL).bind(
         teacherId,
+        q.source_number == null || q.source_number === ''
+          ? null
+          : parseInt(q.source_number, 10),
         q.subject,
         parseInt(q.grade, 10),
         q.unit || null,

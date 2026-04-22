@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS class_students (
 CREATE TABLE IF NOT EXISTS questions (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   owner_teacher_id INTEGER NOT NULL,
+  source_number    INTEGER,
   subject          TEXT NOT NULL,
   grade            INTEGER NOT NULL,
   unit             TEXT,

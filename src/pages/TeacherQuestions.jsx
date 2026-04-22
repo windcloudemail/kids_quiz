@@ -261,6 +261,19 @@ function QuestionRow({ row, canEdit, onEdit, onDelete }) {
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center flex-wrap gap-2 mb-2.5">
+          {row.source_number ? (
+            <span
+              className="rounded-chip font-semibold font-num"
+              style={{
+                background: '#1A1A1A',
+                color: '#fff',
+                fontSize: 11,
+                padding: '2px 8px',
+              }}
+            >
+              第 {row.source_number} 題
+            </span>
+          ) : null}
           <SubjectTag subject={row.subject} size="sm" />
           <Chip>{row.grade} 年級</Chip>
           {row.unit && <Chip>{row.unit}</Chip>}

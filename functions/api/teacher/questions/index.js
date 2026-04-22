@@ -9,7 +9,7 @@ export async function onRequestGet({ request, env, data }) {
   const difficulty = url.searchParams.get('difficulty')
   const q = url.searchParams.get('q')
 
-  let sql = `SELECT id, owner_teacher_id, subject, grade, unit, difficulty, question, used_count,
+  let sql = `SELECT id, owner_teacher_id, source_number, subject, grade, unit, difficulty, question, used_count,
                     (SELECT CASE WHEN COUNT(*) > 0
                             THEN ROUND(SUM(sa.correct) * 100.0 / COUNT(*))
                             ELSE 0 END
@@ -32,7 +32,10 @@ export async function onRequestGet({ request, env, data }) {
     sql += ' AND question LIKE ?'
     binds.push(`%${q}%`)
   }
-  sql += ' ORDER BY id DESC LIMIT 200'
+  // Teacher view: follow the original booklet numbering first, then fall
+  // back to insertion order. Manually added questions (no source_number)
+  // sort to the end by insertion time.
+  sql += ' ORDER BY COALESCE(source_number, 9999999) ASC, id ASC LIMIT 200'
 
   const rows = await env.DB.prepare(sql)
     .bind(...binds)
@@ -69,12 +72,15 @@ export async function onRequestPost({ request, env, data }) {
 
   const result = await env.DB.prepare(
     `INSERT INTO questions
-     (owner_teacher_id, subject, grade, unit, difficulty, question, zhuyin,
+     (owner_teacher_id, source_number, subject, grade, unit, difficulty, question, zhuyin,
       option_a, option_b, option_c, option_d, answer, explanation)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       teacherId,
+      body.source_number == null || body.source_number === ''
+        ? null
+        : parseInt(body.source_number, 10),
       body.subject,
       body.grade,
       body.unit || null,
