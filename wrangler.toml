@@ -1,0 +1,16 @@
+name = "kids_quiz"
+compatibility_date = "2026-04-22"
+pages_build_output_dir = "dist"
+
+# Allow-list for /api/auth/teacher-register. Comma-separated emails.
+# Empty / unset = registration is open. Production locks it to one email
+# so nobody else can create teacher accounts.
+[vars]
+ALLOWED_TEACHER_EMAILS = "windcloudemail@gmail.com"
+
+# Local dev uses a SQLite file under .wrangler/state/v3/d1/.
+# Production database_id is filled in after `wrangler d1 create kids-quiz-db`.
+[[d1_databases]]
+binding       = "DB"
+database_name = "kids-quiz-db"
+database_id   = "ae99b639-005b-4b29-ad45-d81a36b7b6af"
