@@ -113,7 +113,9 @@ export default function BulkUploadModal({ onClose, onSaved }) {
               style={{ border: '2px dashed var(--line)' }}
             >
               <Upload size={32} className="text-ink-sub" />
-              <div className="text-[14px] text-ink">上傳 .json 或 .docx 檔</div>
+              <div className="text-[14px] text-ink">
+                上傳 .json / .docx / .pdf / 圖片
+              </div>
               <label
                 className="inline-flex items-center gap-2 rounded-bubble px-4 py-2 cursor-pointer text-[14px] font-medium"
                 style={{ background: '#1A1A1A', color: '#fff' }}
@@ -122,7 +124,7 @@ export default function BulkUploadModal({ onClose, onSaved }) {
                 選取檔案
                 <input
                   type="file"
-                  accept=".docx,.json,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  accept=".docx,.json,.pdf,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
                   className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
                 />
@@ -134,9 +136,10 @@ export default function BulkUploadModal({ onClose, onSaved }) {
                 <Download size={13} />
                 下載 JSON 範例
               </button>
-              <div className="mt-2 text-[12px] text-ink-sub max-w-md">
-                JSON 陣列 / docx 表格皆可。必填欄位:subject, grade, question, option_a~d, answer。
-                subject 用 chinese/math/english 或 國語/數學/英文。
+              <div className="mt-2 text-[12px] text-ink-sub max-w-md leading-relaxed">
+                JSON 陣列最穩。docx 請用表格、pdf 走 pdfjs 抽文字、圖片走 tesseract OCR。
+                純文字解析會認以「1. 」「1、」「(1)(2)(3)(4)」或「(A)(B)(C)(D)」為序的題目。
+                科目 / 年級可寫在檔名(如「三年級國語.pdf」),否則從欄位或預設值抓。
               </div>
             </div>
             {err && (
