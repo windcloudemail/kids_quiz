@@ -413,7 +413,13 @@ function QuestionRow({ row, canEdit, onEdit, onDelete, selected, onToggleSelect 
           <Stars value={row.difficulty} max={5} size={11} />
         </div>
         <div className="text-[14px]" style={{ lineHeight: 1.55 }}>
-          {row.question}
+          {row.image_url ? (
+            <span className="text-ink-sub text-[12px] italic">
+              題幹以圖像呈現(右側縮圖,點擊看原圖)
+            </span>
+          ) : (
+            row.question
+          )}
         </div>
         <div className="mt-2.5 flex items-center gap-4 text-[13px] text-ink-sub">
           <span className="inline-flex items-center gap-1">

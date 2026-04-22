@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { X, Check, CheckCircle2, XCircle, ArrowRight } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { SUBJECTS } from '../lib/subjects.js'
@@ -8,9 +8,13 @@ import ProgressBar from '../components/ProgressBar.jsx'
 import RubyText from '../components/RubyText.jsx'
 
 export default function Quiz() {
-  const { subject } = useParams()
   const navigate = useNavigate()
-  const [data, setData] = useState(null)
+  const location = useLocation()
+  const stateQuestions = location.state?.questions
+  const previewMode = !!location.state?.previewMode
+  const [data, setData] = useState(
+    stateQuestions ? { questions: stateQuestions } : null
+  )
   const [err, setErr] = useState(null)
   const [idx, setIdx] = useState(0)
   const [selected, setSelected] = useState(null)
@@ -21,19 +25,11 @@ export default function Quiz() {
   const submittingRef = useRef(false)
 
   useEffect(() => {
-    api
-      .get(`/api/student/quiz?subject=${encodeURIComponent(subject)}&count=10`)
-      .then((d) => {
-        if (!d.questions?.length) {
-          setErr('這個科目目前沒有題目')
-          return
-        }
-        setData(d)
-        startTimeRef.current = Date.now()
-        questionStartRef.current = Date.now()
-      })
-      .catch((e) => setErr(e.message))
-  }, [subject])
+    if (!stateQuestions) {
+      // Deep link / refresh — no question payload: bounce back to picker.
+      navigate('/practice', { replace: true })
+    }
+  }, [stateQuestions, navigate])
 
   if (err)
     return (
@@ -44,7 +40,8 @@ export default function Quiz() {
   if (!data) return <main className="p-5 text-sm text-ink-sub">載入中…</main>
 
   const q = data.questions[idx]
-  const s = SUBJECTS[subject]
+  const subject = q?.subject
+  const s = SUBJECTS[subject] || SUBJECTS.chinese
   const total = data.questions.length
   const isLast = idx === total - 1
 
@@ -67,7 +64,21 @@ export default function Quiz() {
     if (submittingRef.current) return
     submittingRef.current = true
     try {
-      const res = await api.post('/api/student/attempts', { attempts })
+      const correctCount = attempts.filter((a) => a.correct).length
+      const wrongCount = attempts.length - correctCount
+      let resultData = {
+        correct: correctCount,
+        wrong: wrongCount,
+        stars: correctCount * 10,
+      }
+      if (!previewMode) {
+        const res = await api.post('/api/student/attempts', { attempts })
+        resultData = {
+          correct: res.correct,
+          wrong: res.wrong,
+          stars: res.stars,
+        }
+      }
       const elapsedSec = Math.round((Date.now() - startTimeRef.current) / 1000)
       const mins = Math.floor(elapsedSec / 60)
       const secs = elapsedSec % 60
@@ -78,17 +89,18 @@ export default function Quiz() {
           return { q: i + 1, text: item.question, your: a.selected, correct: item.answer }
         })
         .filter(Boolean)
-      navigate('/student/result', {
+      navigate('/result', {
         replace: true,
         state: {
           subject,
           unit: q.unit,
-          correct: res.correct,
+          correct: resultData.correct,
           total,
-          wrong: res.wrong,
-          stars: res.stars,
+          wrong: resultData.wrong,
+          stars: resultData.stars,
           time: `${mins} 分 ${String(secs).padStart(2, '0')} 秒`,
           mistakes,
+          previewMode,
         },
       })
     } catch (e) {
@@ -99,7 +111,7 @@ export default function Quiz() {
 
   const onClose = () => {
     if (attempts.length && !window.confirm('離開會放棄進度,確定嗎?')) return
-    navigate('/student')
+    navigate('/practice')
   }
 
   return (

@@ -35,6 +35,7 @@ export async function parseFile(file) {
   const type = file.type || ''
   const subjectHint = detectSubjectFromName(file.name || '')
   const gradeHint = detectGradeFromName(file.name || '')
+  const unitHint = deriveBookNameFromFilename(file.name || '')
 
   let rows
   if (name.endsWith('.json') || type === 'application/json') {
@@ -52,7 +53,17 @@ export async function parseFile(file) {
     throw new Error(`不支援的檔案格式(${type || '.' + name.split('.').pop()})`)
   }
 
-  return { questions: rows.map((r) => normalize(r, subjectHint, gradeHint)) }
+  return {
+    questions: rows.map((r) => normalize(r, subjectHint, gradeHint, unitHint)),
+  }
+}
+
+function deriveBookNameFromFilename(name) {
+  if (!name) return null
+  // Drop extension and any trailing number suffix like (1), (2)
+  let base = name.replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)\s*$/, '')
+  base = base.replace(/_/g, ' ').trim()
+  return base || null
 }
 
 // =============================================================
@@ -737,7 +748,7 @@ function answerMapFromRows(rows) {
 // Normalisation + validation
 // =============================================================
 
-function normalize(raw, subjectHint, gradeHint) {
+function normalize(raw, subjectHint, gradeHint, unitHint) {
   const subjectKey = raw.subject
   const subject =
     SUBJECT_MAP[subjectKey] ||
@@ -766,11 +777,14 @@ function normalize(raw, subjectHint, gradeHint) {
   const questionPart2 = String(raw.question_part2 || '').trim()
   const question = [questionMain, questionPart2].filter(Boolean).join(' ')
 
+  const rawUnit = (raw.unit || '').trim()
+  const unit = rawUnit || unitHint || null
+
   return {
     source_number: raw.source_number || null,
     subject,
     grade: parseInt(raw.grade, 10) || gradeHint || 0,
-    unit: (raw.unit || '').trim() || null,
+    unit,
     difficulty: parseInt(raw.difficulty, 10) || 2,
     question,
     option_a: opt('a', 1),
