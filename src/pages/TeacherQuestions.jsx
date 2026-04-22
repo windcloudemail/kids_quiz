@@ -48,6 +48,26 @@ export default function TeacherQuestions() {
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(null)
   const [showBulk, setShowBulk] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const selectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const r of rows) next.add(r.id)
+      return next
+    })
+  }
+  const clearSelection = () => setSelectedIds(new Set())
+  const isAllVisibleSelected =
+    rows.length > 0 && rows.every((r) => selectedIds.has(r.id))
 
   const reload = async () => {
     setBusy(true)
@@ -78,8 +98,29 @@ export default function TeacherQuestions() {
     try {
       await api.del(`/api/teacher/questions/${row.id}`)
       setRows(rows.filter((r) => r.id !== row.id))
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(row.id)
+        return next
+      })
     } catch (e) {
       alert('刪除失敗:' + e.message)
+    }
+  }
+
+  const onDeleteSelected = async () => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    if (!window.confirm(`確定刪除選中的 ${ids.length} 題?此動作無法復原。`)) return
+    try {
+      const res = await api.post('/api/teacher/questions/delete-bulk', { ids })
+      clearSelection()
+      await reload()
+      if (res.skipped > 0) {
+        alert(`已刪 ${res.deleted} 題,其中 ${res.skipped} 題不是你的題目,已略過`)
+      }
+    } catch (e) {
+      alert('批量刪除失敗:' + e.message)
     }
   }
 
@@ -172,6 +213,63 @@ export default function TeacherQuestions() {
           </span>
         </div>
 
+        {rows.length > 0 && (
+          <div
+            className="mb-4 rounded-bubble p-3 flex items-center gap-3 flex-wrap"
+            style={{
+              background: selectedIds.size > 0 ? 'var(--warn-bg)' : 'var(--page)',
+              border: '1px solid var(--line)',
+            }}
+          >
+            <label className="inline-flex items-center gap-2 text-[13px] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isAllVisibleSelected}
+                onChange={(e) =>
+                  e.target.checked ? selectAllVisible() : clearSelection()
+                }
+                style={{ width: 16, height: 16 }}
+              />
+              全選本頁({rows.length} 題)
+            </label>
+            {selectedIds.size > 0 && (
+              <>
+                <span className="text-[13px] text-ink-sub">
+                  已選{' '}
+                  <span
+                    className="font-semibold font-num"
+                    style={{ color: '#C6651E' }}
+                  >
+                    {selectedIds.size}
+                  </span>{' '}
+                  題
+                </span>
+                <button
+                  onClick={clearSelection}
+                  className="text-[12px] text-ink-sub hover:text-ink underline"
+                >
+                  取消選取
+                </button>
+                <div className="flex-1" />
+                <button
+                  onClick={onDeleteSelected}
+                  className="inline-flex items-center gap-1.5 rounded-bubble font-medium"
+                  style={{
+                    background: '#D14343',
+                    color: '#fff',
+                    fontSize: 13,
+                    padding: '8px 14px',
+                    minHeight: 36,
+                  }}
+                >
+                  <Trash2 size={14} />
+                  刪除選中 {selectedIds.size} 題
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         {err && (
           <div className="mb-4 text-[13px]" style={{ color: '#D14343' }}>
             {err}
@@ -190,6 +288,8 @@ export default function TeacherQuestions() {
                 key={r.id}
                 row={r}
                 canEdit={r.owner_teacher_id === teacherId}
+                selected={selectedIds.has(r.id)}
+                onToggleSelect={() => toggleSelect(r.id)}
                 onEdit={() => setEditing({ mode: 'edit', data: r })}
                 onDelete={() => onDelete(r)}
               />
@@ -253,12 +353,24 @@ function FilterSelect({ value, onChange, options }) {
   )
 }
 
-function QuestionRow({ row, canEdit, onEdit, onDelete }) {
+function QuestionRow({ row, canEdit, onEdit, onDelete, selected, onToggleSelect }) {
   return (
     <div
       className="bg-card rounded-card border border-line shadow-card p-4 flex items-start gap-4"
-      style={{ transition: 'border-color 0.15s ease' }}
+      style={{
+        transition: 'border-color 0.15s ease',
+        borderColor: selected ? '#C6651E' : undefined,
+        background: selected ? 'var(--warn-bg)' : undefined,
+      }}
     >
+      <input
+        type="checkbox"
+        checked={!!selected}
+        onChange={onToggleSelect}
+        className="mt-1 shrink-0 cursor-pointer"
+        style={{ width: 18, height: 18 }}
+        aria-label="選取此題"
+      />
       {row.image_url && (
         <a
           href={row.image_url}

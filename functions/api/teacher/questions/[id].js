@@ -60,12 +60,30 @@ export async function onRequestDelete({ env, data, params }) {
   const id = parseInt(params.id, 10)
   if (!id) return error('bad id', 400)
 
-  const row = await env.DB.prepare('SELECT owner_teacher_id FROM questions WHERE id = ?')
+  const row = await env.DB
+    .prepare('SELECT owner_teacher_id, image_url FROM questions WHERE id = ?')
     .bind(id)
     .first()
   if (!row) return error('not found', 404)
   if (row.owner_teacher_id !== teacherId) return error('只能刪除自己的題目', 403)
 
-  await env.DB.prepare('DELETE FROM questions WHERE id = ?').bind(id).run()
+  // Clear child rows first; student_attempts.question_id references this row
+  // and previously caused a 500 (error 1101) when a question that had been
+  // practiced was deleted.
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM student_attempts WHERE question_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM questions WHERE id = ?').bind(id),
+  ])
+
+  // Best-effort R2 cleanup
+  if (row.image_url && row.image_url.startsWith('/api/media/') && env.MEDIA) {
+    const key = decodeURIComponent(row.image_url.replace('/api/media/', ''))
+    try {
+      await env.MEDIA.delete(key)
+    } catch {
+      /* ignore */
+    }
+  }
+
   return json({ ok: true })
 }
