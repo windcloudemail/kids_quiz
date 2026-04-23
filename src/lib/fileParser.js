@@ -582,6 +582,11 @@ function extractLeadingMarkerStyle(rawText) {
 }
 
 function extractLeadingOptions(text) {
+  // pdf.js dumps number-line labels ("0 1 2 3 4 5 6 7 8 9", often glued
+  // together as "0123456789") into the text stream when the question
+  // shows a number line. Strip those so they don't eat the first bare-
+  // digit option marker.
+  text = text.replace(/(?:^|[\s\n])0\s*1\s*2\s*3\s*4\s*5\s*6\s*7\s*8\s*9/g, ' ')
   const markersList = [
     ['(1)', '(2)', '(3)', '(4)'],
     ['(A)', '(B)', '(C)', '(D)'],
@@ -622,15 +627,39 @@ function extractLeadingOptions(text) {
     }
   }
   // Taiwan official exam style: bare numeric markers "1 text 2 text 3 text
-  // 4 text". The first "1" must sit at a line start (after \n or very
-  // beginning) so we don't latch onto e.g. "第 1 籃" inside the question
-  // text. Subsequent markers 2/3/4 can appear on the same line (options
-  // packed inline) or after a newline (options one per line).
-  const bareRe = /(?:^|\n)\s*1\s+([\s\S]+?)\s+2\s+([\s\S]+?)\s+3\s+([\s\S]+?)\s+4\s+([\s\S]+)$/
-  const m = text.match(bareRe)
+  // 4 text". The first "1" must come after a reliable boundary so we
+  // don't latch onto e.g. "第 1 籃" mid-question:
+  //   - start of string / newline (options on their own line)
+  //   - "？" or "?" (question just ended, options follow on the same line)
+  // Subsequent 2/3/4 markers can be anywhere downstream — whitespace both
+  // sides is enough of a signal because option text doesn't naturally
+  // contain " 2 " / " 3 " / " 4 " patterns in Chinese.
+  const bareRe = /(?:(?:^|\n)\s*|[?？]\s*)1\s+([\s\S]+?)\s+2\s+([\s\S]+?)\s+3\s+([\s\S]+?)\s+4\s+([\s\S]+)$/
+  let m = text.match(bareRe)
   if (m) {
+    const oneIdx = text.indexOf('1', m.index)
+    const qEnd = oneIdx > 0 ? oneIdx : m.index
     return {
-      q: text.substring(0, m.index).trim(),
+      q: text.substring(0, qEnd).trim(),
+      qp2: '',
+      o1: m[1].trim(),
+      o2: m[2].trim(),
+      o3: m[3].trim(),
+      o4: m[4].trim(),
+    }
+  }
+  // Fallback for the "marker glued to option text" quirk seen on a couple
+  // of purely-numeric questions (e.g. Q21 ends up as " 13 2 18 3 1140 4
+  // 1146" in the text stream — "1" immediately followed by "3" with no
+  // space). Restricted to \d+ options so Chinese-text options don't get
+  // misparsed here.
+  const adjRe = /(?:(?:^|\n)\s*|[?？]\s*)1(\d+)\s+2\s*(\d+)\s+3\s*(\d+)\s+4\s*(\d+)(?=\s*(?:\n|$))/
+  m = text.match(adjRe)
+  if (m) {
+    const oneIdx = text.indexOf('1', m.index)
+    const qEnd = oneIdx > 0 ? oneIdx : m.index
+    return {
+      q: text.substring(0, qEnd).trim(),
       qp2: '',
       o1: m[1].trim(),
       o2: m[2].trim(),
