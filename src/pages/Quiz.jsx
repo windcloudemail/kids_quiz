@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import {
+  useParams,
+  useNavigate,
+  useSearchParams,
+  useLocation,
+} from 'react-router-dom'
 import { X, Check, CheckCircle2, XCircle, ArrowRight } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { SUBJECTS } from '../lib/subjects.js'
@@ -7,10 +12,40 @@ import SubjectTag from '../components/SubjectTag.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import RubyText from '../components/RubyText.jsx'
 
+// Client-side option shuffle used when the Quiz is driven by pre-loaded
+// questions from navigation state (e.g. "練錯題" after Result). The server
+// already shuffles for the normal fetch path; this keeps state-driven runs
+// consistent without a round-trip.
+function shuffleOptionsClient(q) {
+  const letters = ['A', 'B', 'C', 'D']
+  const perm = [...letters]
+  for (let i = perm.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[perm[i], perm[j]] = [perm[j], perm[i]]
+  }
+  const byLabel = Object.fromEntries((q.options || []).map((o) => [o.label, o.text]))
+  const options = perm.map((origLetter, i) => ({
+    label: letters[i],
+    text: byLabel[origLetter],
+  }))
+  const answer = letters[perm.indexOf(q.answer)]
+  return { ...q, options, answer }
+}
+
 export default function Quiz() {
   const { subject } = useParams()
   const navigate = useNavigate()
-  const [data, setData] = useState(null)
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const stateQuestions = location.state?.questions
+  const stateShuffle = location.state?.shuffle
+  const [data, setData] = useState(() => {
+    if (!stateQuestions?.length) return null
+    const qs = stateShuffle
+      ? stateQuestions.map(shuffleOptionsClient)
+      : stateQuestions
+    return { questions: qs }
+  })
   const [err, setErr] = useState(null)
   const [idx, setIdx] = useState(0)
   const [selected, setSelected] = useState(null)
@@ -21,8 +56,17 @@ export default function Quiz() {
   const submittingRef = useRef(false)
 
   useEffect(() => {
+    if (stateQuestions?.length) return // already loaded from navigation state
+    const qs = new URLSearchParams()
+    qs.set('subject', subject)
+    qs.set('count', searchParams.get('count') || '10')
+    qs.set('shuffle', searchParams.get('shuffle') === '0' ? '0' : '1')
+    const unit = searchParams.get('unit')
+    if (unit) qs.set('unit', unit)
+    const grade = searchParams.get('grade')
+    if (grade) qs.set('grade', grade)
     api
-      .get(`/api/student/quiz?subject=${encodeURIComponent(subject)}&count=10`)
+      .get(`/api/student/quiz?${qs.toString()}`)
       .then((d) => {
         if (!d.questions?.length) {
           setErr('這個科目目前沒有題目')
@@ -33,6 +77,7 @@ export default function Quiz() {
         questionStartRef.current = Date.now()
       })
       .catch((e) => setErr(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subject])
 
   if (err)
@@ -67,14 +112,26 @@ export default function Quiz() {
     if (submittingRef.current) return
     submittingRef.current = true
     try {
-      const res = await api.post('/api/student/attempts', { attempts })
+      // Practice with pre-loaded questions (e.g. 練錯題 re-run) must not
+      // double-count as a fresh attempt. The wrong questions will be shown
+      // on Result anyway; we just skip the server write.
+      let res = {
+        correct: attempts.filter((a) => a.correct).length,
+        wrong: attempts.filter((a) => !a.correct).length,
+        stars: attempts.filter((a) => a.correct).length * 10,
+      }
+      if (!stateQuestions?.length) {
+        res = await api.post('/api/student/attempts', { attempts })
+      }
       const elapsedSec = Math.round((Date.now() - startTimeRef.current) / 1000)
       const mins = Math.floor(elapsedSec / 60)
       const secs = elapsedSec % 60
+      const wrongQuestions = []
       const mistakes = attempts
         .map((a, i) => {
           if (a.correct) return null
           const item = data.questions[i]
+          wrongQuestions.push(item)
           return { q: i + 1, text: item.question, your: a.selected, correct: item.answer }
         })
         .filter(Boolean)
@@ -89,6 +146,7 @@ export default function Quiz() {
           stars: res.stars,
           time: `${mins} 分 ${String(secs).padStart(2, '0')} 秒`,
           mistakes,
+          wrongQuestions,
         },
       })
     } catch (e) {

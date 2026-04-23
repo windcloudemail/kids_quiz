@@ -259,10 +259,48 @@ async function parsePDF(file) {
   const withLoc = extractTrailingMarkerStyleWithLoc(richLines)
   const plain = extractLeadingMarkerStyle(rawText)
 
-  if (withLoc.length > plain.length) {
-    return attachImagesToQuestions(withLoc, pages)
+  // Merge both styles by source_number: prefer withLoc (carries _loc so the
+  // question image can be cropped from the rendered page), fill any gaps
+  // with plain-style entries. This avoids the old either/or that dropped
+  // images whenever leading-style happened to detect one more question
+  // than trailing-style.
+  const byNum = new Map()
+  const unnumbered = []
+  for (const q of withLoc) {
+    if (q.source_number) byNum.set(q.source_number, q)
+    else unnumbered.push(q)
   }
-  return plain
+  for (const q of plain) {
+    if (q.source_number && !byNum.has(q.source_number)) byNum.set(q.source_number, q)
+    else if (!q.source_number) unnumbered.push(q)
+  }
+  const merged = [
+    ...[...byNum.values()].sort(
+      (a, b) => (a.source_number || 0) - (b.source_number || 0)
+    ),
+    ...unnumbered,
+  ]
+  // Try to locate plain-style entries (which have no _loc) by scanning
+  // rich lines for a matching question header, so they get images too.
+  for (const q of merged) {
+    if (q._loc || !q.source_number) continue
+    const headerRe = new RegExp(`^${q.source_number}\\.\\s`)
+    const hit = richLines.find((l) => headerRe.test(l.text))
+    if (hit) {
+      const nextHit = richLines.find(
+        (l) =>
+          l.pageIndex === hit.pageIndex &&
+          l.y < hit.y &&
+          /^\d+\.\s/.test(l.text)
+      )
+      q._loc = {
+        pageIndex: hit.pageIndex,
+        yStart: hit.y,
+        yEnd: nextHit ? nextHit.y : null,
+      }
+    }
+  }
+  return attachImagesToQuestions(merged, pages)
 }
 
 function extractTrailingMarkerStyleWithLoc(richLines) {

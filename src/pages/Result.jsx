@@ -42,7 +42,7 @@ export default function Result() {
   }, [st, navigate])
 
   if (!st) return null
-  const { subject, unit, correct, total, wrong, stars, time, mistakes } = st
+  const { subject, unit, correct, total, wrong, stars, time, mistakes, wrongQuestions } = st
   const s = SUBJECTS[subject]
   const pct = total > 0 ? Math.round((correct * 100) / total) : 0
   const moodKey = pct >= 80 ? 'great' : pct >= 60 ? 'ok' : 'low'
@@ -190,12 +190,19 @@ export default function Result() {
         </button>
         <div className="grid grid-cols-2 gap-3">
           <button
-            disabled
-            className="inline-flex items-center justify-center gap-2 rounded-btn bg-card border border-line text-ink-sub cursor-not-allowed"
+            disabled={!wrongQuestions?.length}
+            onClick={() => {
+              if (!wrongQuestions?.length) return
+              navigate(`/student/quiz/${subject}`, {
+                replace: true,
+                state: { questions: wrongQuestions, shuffle: true },
+              })
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-btn bg-card border border-line font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ minHeight: 56, fontSize: 15 }}
           >
             <BookMarked size={18} strokeWidth={2} />
-            練錯題
+            練錯題 {wrongQuestions?.length ? `(${wrongQuestions.length})` : ''}
           </button>
           <button
             onClick={() => navigate('/student')}
