@@ -254,6 +254,17 @@ async function parsePDF(file) {
     if (curText) richLines.push({ text: curText, y: curY, pageIndex: i - 1 })
   }
 
+  // --- DIAG ---
+  console.log('[parsePDF] pages:', pages.length, 'richLines:', richLines.length)
+  if (pages[0]) {
+    const vp = pages[0].viewport
+    console.log('[parsePDF] page0 viewport: w=', vp.width, 'h=', vp.height, 'scale=', vp.scale)
+    console.log('[parsePDF] page0 canvas: w=', pages[0].canvas.width, 'h=', pages[0].canvas.height)
+  }
+  console.log('[parsePDF] first 30 richLines:',
+    richLines.slice(0, 30).map((l) => ({ p: l.pageIndex, y: Math.round(l.y * 10) / 10, t: l.text.slice(0, 60) })))
+  // --- /DIAG ---
+
   const rawText = richLines.map((l) => l.text).join('\n')
 
   const withLoc = extractTrailingMarkerStyleWithLoc(richLines)
@@ -308,6 +319,17 @@ async function parsePDF(file) {
     const loc = headerLocs.get(q.source_number)
     if (loc) q._loc = loc
   }
+
+  // --- DIAG ---
+  console.log('[parsePDF] withLoc:', withLoc.length, 'of which _loc:', withLoc.filter((q) => q._loc).length)
+  console.log('[parsePDF] plain:', plain.length)
+  console.log('[parsePDF] headerLocs size:', headerLocs.size, 'entries:',
+    [...headerLocs.entries()].slice(0, 30).map(([n, l]) => ({
+      n, p: l.pageIndex, yS: Math.round(l.yStart * 10) / 10, yE: l.yEnd == null ? null : Math.round(l.yEnd * 10) / 10,
+    })))
+  console.log('[parsePDF] merged:', merged.length, '_loc:', merged.filter((q) => q._loc).length)
+  // --- /DIAG ---
+
   return attachImagesToQuestions(merged, pages)
 }
 
@@ -425,12 +447,15 @@ function extractTrailingMarkerStyleWithLoc(richLines) {
 }
 
 function attachImagesToQuestions(questions, pages) {
+  let attached = 0
+  let skippedNoLoc = 0
+  let skippedSmall = 0
   for (const q of questions) {
     const loc = q._loc
     delete q._loc
-    if (!loc) continue
+    if (!loc) { skippedNoLoc++; console.log('[attachImg] q', q.source_number, 'skip: no _loc'); continue }
     const page = pages[loc.pageIndex]
-    if (!page) continue
+    if (!page) { console.log('[attachImg] q', q.source_number, 'skip: no page', loc.pageIndex); continue }
     const { canvas, viewport } = page
     const scale = viewport.scale
     const h = viewport.height
@@ -446,7 +471,9 @@ function attachImagesToQuestions(questions, pages) {
         ? Math.min(h, Math.ceil(h - loc.yEnd * scale) + padBottom)
         : h
     const sliceH = bottomPx - topPx
-    if (sliceH < 40) continue
+    console.log('[attachImg] q', q.source_number, 'p', loc.pageIndex, 'yS', loc.yStart, 'yE', loc.yEnd,
+      'h', h, 'scale', scale, '-> topPx', topPx, 'botPx', bottomPx, 'sliceH', sliceH)
+    if (sliceH < 40) { skippedSmall++; console.log('[attachImg] q', q.source_number, 'skip: sliceH', sliceH); continue }
 
     const slice = document.createElement('canvas')
     slice.width = canvas.width
@@ -456,7 +483,9 @@ function attachImagesToQuestions(questions, pages) {
     sctx.fillRect(0, 0, slice.width, slice.height)
     sctx.drawImage(canvas, 0, topPx, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
     q.image_data_url = slice.toDataURL('image/jpeg', 0.85)
+    attached++
   }
+  console.log('[attachImg] summary: attached', attached, 'skipNoLoc', skippedNoLoc, 'skipSmall', skippedSmall, 'total', questions.length)
   return questions
 }
 
