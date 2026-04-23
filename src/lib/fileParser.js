@@ -18,6 +18,9 @@ import * as XLSX from 'xlsx'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
+// Debug: expose parseFile on window so a console session can invoke it directly.
+// Deferred until first parse call via module top-level assignment below.
+
 const SUBJECT_MAP = {
   chinese: 'chinese', 國語: 'chinese', 中文: 'chinese', 語文: 'chinese', 國文: 'chinese',
   math: 'math', 數學: 'math', 數: 'math', 算數: 'math', 算術: 'math',
@@ -1004,4 +1007,8 @@ function detectGradeFromName(name) {
     if (n >= 1 && n <= 6) return n
   }
   return null
+}
+
+if (typeof window !== "undefined") {
+  window.__parseFile = parseFile
 }
