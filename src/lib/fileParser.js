@@ -308,7 +308,33 @@ async function parsePDF(file) {
     const loc = headerLocs.get(q.source_number)
     if (loc) q._loc = loc
   }
-  return attachImagesToQuestions(merged, pages)
+  return attachImagesToQuestions(merged, pages, richLines)
+}
+
+// Find the y of the first option marker between (yEnd, yStart) on pageIndex.
+// We crop the question image only up to this y so the options + page footer
+// stay out of the picture. PDF y is bottom-up so "between" means
+// yEnd < y < yStart. Recognises bare-digit "1 ..." and bracketed "(1)" /
+// "①" marker styles.
+function findFirstOptionY(richLines, pageIndex, yStart, yEnd) {
+  // Matches the option-1 marker in any of the formats we parse:
+  //   "1 裝滿 6 個水壺"         bare digit + whitespace
+  //   "13 2 18 3 1140 4 1146"  glued digit (Q21 edge case)
+  //   "① 裝滿 6 個水壺"         circled
+  //   "(1) 裝滿..." / "（1）..." bracketed
+  const optionOneRe = /^\s*(?:1[\s\d]|①|\(1\)|（1）)/
+  let bestY = null
+  for (const l of richLines) {
+    if (l.pageIndex !== pageIndex) continue
+    if (l.y >= yStart) continue
+    if (yEnd !== null && l.y <= yEnd) continue
+    if (!optionOneRe.test(l.text)) continue
+    // Pick the HIGHEST y (closest below yStart) — that's where options
+    // actually begin; anything lower is a continuation line or the page
+    // footer.
+    if (bestY === null || l.y > bestY) bestY = l.y
+  }
+  return bestY
 }
 
 // Scan all rich lines and produce a Map<source_number, {pageIndex, yStart,
@@ -424,7 +450,7 @@ function extractTrailingMarkerStyleWithLoc(richLines) {
   return out
 }
 
-function attachImagesToQuestions(questions, pages) {
+function attachImagesToQuestions(questions, pages, richLines) {
   for (const q of questions) {
     const loc = q._loc
     delete q._loc
@@ -435,18 +461,34 @@ function attachImagesToQuestions(questions, pages) {
     const scale = viewport.scale
     const h = viewport.height
 
+    // Tighten yEnd to the first option marker's y so the options and the
+    // page footer ("請繼續作答!" / page number) don't end up inside the
+    // image. Without this, every cropped question shows ①②③④ inside
+    // the image AND again as A/B/C/D below — a useless duplication for
+    // text-only questions and a messy extra band for questions with a
+    // real figure.
+    const firstOptY = richLines
+      ? findFirstOptionY(richLines, loc.pageIndex, loc.yStart, loc.yEnd)
+      : null
+    const effectiveYEnd = firstOptY !== null ? firstOptY : loc.yEnd
+
     // PDF y is bottom-up, canvas y is top-down.
     // Text y is the baseline of the line, so top-of-line ≈ y + font size (~12pt).
     // Add a small padding around the crop so we don't clip glyphs.
     const padTop = 18
-    const padBottom = 12
+    const padBottom = 4
     const topPx = Math.max(0, Math.floor(h - loc.yStart * scale) - padTop)
     const bottomPx =
-      loc.yEnd != null
-        ? Math.min(h, Math.ceil(h - loc.yEnd * scale) + padBottom)
+      effectiveYEnd != null
+        ? Math.min(h, Math.ceil(h - effectiveYEnd * scale) + padBottom)
         : h
     const sliceH = bottomPx - topPx
-    if (sliceH < 40) continue
+    // Pure text-only questions (e.g. 哥哥想買遊戲機…) produce a tight
+    // crop that's essentially just the question text — showing it as an
+    // image on top of the OCR'd question field is redundant AND looks
+    // tiny on mobile. The 140-px threshold picks up roughly "3+ text
+    // lines or a visible figure" while skipping 1-2 line pure text.
+    if (sliceH < 140) continue
 
     const slice = document.createElement('canvas')
     slice.width = canvas.width
