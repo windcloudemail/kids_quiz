@@ -3,12 +3,18 @@ import {
   Plus,
   Upload,
   ChevronDown,
+  ChevronUp,
   Search,
   SearchX,
   Users,
   Target,
   Pencil,
   Trash2,
+  Check,
+  X,
+  Eye,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { SUBJECTS, SUBJECT_LIST } from '../lib/subjects.js'
@@ -49,9 +55,19 @@ export default function TeacherQuestions() {
   const [editing, setEditing] = useState(null)
   const [showBulk, setShowBulk] = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [expandedIds, setExpandedIds] = useState(() => new Set())
+  const [stepperStart, setStepperStart] = useState(null) // number | null
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const toggleExpand = (id) => {
+    setExpandedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -250,22 +266,38 @@ export default function TeacherQuestions() {
                 >
                   取消選取
                 </button>
-                <div className="flex-1" />
-                <button
-                  onClick={onDeleteSelected}
-                  className="inline-flex items-center gap-1.5 rounded-bubble font-medium"
-                  style={{
-                    background: '#D14343',
-                    color: '#fff',
-                    fontSize: 13,
-                    padding: '8px 14px',
-                    minHeight: 36,
-                  }}
-                >
-                  <Trash2 size={14} />
-                  刪除選中 {selectedIds.size} 題
-                </button>
               </>
+            )}
+            <div className="flex-1" />
+            <button
+              onClick={() => setStepperStart(0)}
+              className="inline-flex items-center gap-1.5 rounded-bubble font-medium bg-card border border-line"
+              style={{
+                fontSize: 13,
+                padding: '8px 14px',
+                minHeight: 36,
+                color: '#1A1A1A',
+              }}
+              title="從第一題開始審閱,一題一題翻"
+            >
+              <Eye size={14} />
+              審題模式
+            </button>
+            {selectedIds.size > 0 && (
+              <button
+                onClick={onDeleteSelected}
+                className="inline-flex items-center gap-1.5 rounded-bubble font-medium"
+                style={{
+                  background: '#D14343',
+                  color: '#fff',
+                  fontSize: 13,
+                  padding: '8px 14px',
+                  minHeight: 36,
+                }}
+              >
+                <Trash2 size={14} />
+                刪除選中 {selectedIds.size} 題
+              </button>
             )}
           </div>
         )}
@@ -283,15 +315,18 @@ export default function TeacherQuestions() {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {rows.map((r) => (
+            {rows.map((r, idx) => (
               <QuestionRow
                 key={r.id}
                 row={r}
                 canEdit={r.owner_teacher_id === teacherId}
                 selected={selectedIds.has(r.id)}
+                expanded={expandedIds.has(r.id)}
                 onToggleSelect={() => toggleSelect(r.id)}
+                onToggleExpand={() => toggleExpand(r.id)}
                 onEdit={() => setEditing({ mode: 'edit', data: r })}
                 onDelete={() => onDelete(r)}
+                onStartStepper={() => setStepperStart(idx)}
               />
             ))}
           </div>
@@ -317,6 +352,14 @@ export default function TeacherQuestions() {
             setShowBulk(false)
             reload()
           }}
+        />
+      )}
+
+      {stepperStart != null && rows.length > 0 && (
+        <ReviewStepperModal
+          rows={rows}
+          startIndex={stepperStart}
+          onClose={() => setStepperStart(null)}
         />
       )}
     </TeacherShell>
@@ -353,89 +396,124 @@ function FilterSelect({ value, onChange, options }) {
   )
 }
 
-function QuestionRow({ row, canEdit, onEdit, onDelete, selected, onToggleSelect }) {
+function QuestionRow({
+  row,
+  canEdit,
+  onEdit,
+  onDelete,
+  selected,
+  onToggleSelect,
+  expanded,
+  onToggleExpand,
+}) {
+  const hasImage = !!row.image_url
   return (
     <div
-      className="bg-card rounded-card border border-line shadow-card p-4 flex items-start gap-4"
+      className="bg-card rounded-card border border-line shadow-card"
       style={{
         transition: 'border-color 0.15s ease',
         borderColor: selected ? '#C6651E' : undefined,
         background: selected ? 'var(--warn-bg)' : undefined,
       }}
     >
-      <input
-        type="checkbox"
-        checked={!!selected}
-        onChange={onToggleSelect}
-        className="mt-1 shrink-0 cursor-pointer"
-        style={{ width: 18, height: 18 }}
-        aria-label="選取此題"
-      />
-      {row.image_url && (
-        <a
-          href={row.image_url}
-          target="_blank"
-          rel="noreferrer"
-          className="shrink-0 rounded-bubble overflow-hidden"
-          style={{
-            width: 80,
-            height: 80,
-            border: '1px solid var(--line)',
-            background: '#FAFAF8',
-          }}
-        >
-          <img
-            src={row.image_url}
-            alt="題目預覽"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            loading="lazy"
+      <div className="p-4 flex items-start gap-4">
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={onToggleSelect}
+          className="mt-1 shrink-0 cursor-pointer"
+          style={{ width: 18, height: 18 }}
+          aria-label="選取此題"
+        />
+        {hasImage && (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            className="shrink-0 rounded-bubble overflow-hidden"
+            style={{
+              width: 80,
+              height: 80,
+              border: '1px solid var(--line)',
+              background: '#FAFAF8',
+              padding: 0,
+            }}
+            aria-label="展開看大圖"
+          >
+            <img
+              src={row.image_url}
+              alt="題目縮圖"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              loading="lazy"
+            />
+          </button>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center flex-wrap gap-2 mb-2.5">
+            {row.source_number ? (
+              <span
+                className="rounded-chip font-semibold font-num"
+                style={{
+                  background: '#1A1A1A',
+                  color: '#fff',
+                  fontSize: 11,
+                  padding: '2px 8px',
+                }}
+              >
+                第 {row.source_number} 題
+              </span>
+            ) : null}
+            <SubjectTag subject={row.subject} size="sm" />
+            <Chip>{row.grade} 年級</Chip>
+            {row.unit && <Chip>{row.unit}</Chip>}
+            <Stars value={row.difficulty} max={5} size={11} />
+          </div>
+          <div
+            className="text-[14px]"
+            style={{
+              lineHeight: 1.55,
+              color: hasImage && !expanded ? 'var(--ink-sub)' : undefined,
+              fontStyle: hasImage && !expanded ? 'italic' : undefined,
+            }}
+          >
+            {hasImage && !expanded ? '題幹以圖像呈現(點縮圖或「展開」看完整題目)' : row.question}
+          </div>
+          <div className="mt-2.5 flex items-center gap-4 text-[13px] text-ink-sub">
+            <span className="inline-flex items-center gap-1">
+              <Users size={13} strokeWidth={2} />
+              被使用 <span className="font-num">{row.used_count}</span> 次
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Target size={13} strokeWidth={2} />
+              正確率{' '}
+              <span
+                className="font-num font-medium"
+                style={{ color: accuracyColor(row.accuracy || 0) }}
+              >
+                {row.accuracy || 0}%
+              </span>
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <IconBtn
+            icon={expanded ? ChevronUp : ChevronDown}
+            label={expanded ? '收合' : '展開審題'}
+            onClick={onToggleExpand}
           />
-        </a>
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center flex-wrap gap-2 mb-2.5">
-          {row.source_number ? (
-            <span
-              className="rounded-chip font-semibold font-num"
-              style={{
-                background: '#1A1A1A',
-                color: '#fff',
-                fontSize: 11,
-                padding: '2px 8px',
-              }}
-            >
-              第 {row.source_number} 題
-            </span>
-          ) : null}
-          <SubjectTag subject={row.subject} size="sm" />
-          <Chip>{row.grade} 年級</Chip>
-          {row.unit && <Chip>{row.unit}</Chip>}
-          <Stars value={row.difficulty} max={5} size={11} />
-        </div>
-        <div className="text-[14px]" style={{ lineHeight: 1.55 }}>
-          {row.question}
-        </div>
-        <div className="mt-2.5 flex items-center gap-4 text-[13px] text-ink-sub">
-          <span className="inline-flex items-center gap-1">
-            <Users size={13} strokeWidth={2} />
-            被使用 <span className="font-num">{row.used_count}</span> 次
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <Target size={13} strokeWidth={2} />
-            正確率{' '}
-            <span
-              className="font-num font-medium"
-              style={{ color: accuracyColor(row.accuracy || 0) }}
-            >
-              {row.accuracy || 0}%
-            </span>
-          </span>
+          {canEdit && (
+            <>
+              <IconBtn icon={Pencil} label="編輯" onClick={onEdit} />
+              <IconBtn icon={Trash2} label="刪除" onClick={onDelete} danger />
+            </>
+          )}
         </div>
       </div>
-      {canEdit && (
-        <div className="flex items-center gap-1 shrink-0">
-          <IconBtn icon={Pencil} label="編輯" onClick={onEdit} />
-          <IconBtn icon={Trash2} label="刪除" onClick={onDelete} danger />
+      {expanded && (
+        <div
+          className="px-4 pb-4"
+          style={{ borderTop: '1px solid var(--line-soft)' }}
+        >
+          <QuestionReview row={row} />
         </div>
       )}
     </div>
@@ -669,6 +747,241 @@ function Field({ label, children }) {
     <div className="mt-3">
       <label className="block text-[13px] font-medium text-ink-sub mb-1">{label}</label>
       {children}
+    </div>
+  )
+}
+
+// Shared inline review block: renders the question as a student would see it,
+// plus the correct answer highlighted in green and the explanation. Used by
+// both the inline row expansion and the stepper modal.
+function QuestionReview({ row }) {
+  const hasImage = !!row.image_url
+  const opts = [
+    { L: 'A', text: row.option_a },
+    { L: 'B', text: row.option_b },
+    { L: 'C', text: row.option_c },
+    { L: 'D', text: row.option_d },
+  ]
+  return (
+    <div className="pt-4">
+      {hasImage && (
+        <div className="mb-3">
+          <a href={row.image_url} target="_blank" rel="noreferrer">
+            <img
+              src={row.image_url}
+              alt="題目原圖"
+              style={{
+                maxWidth: '100%',
+                maxHeight: 420,
+                borderRadius: 10,
+                border: '1px solid var(--line)',
+                background: '#fff',
+              }}
+            />
+          </a>
+        </div>
+      )}
+      {row.question && (
+        <div className="mb-3">
+          {hasImage && (
+            <div className="text-[11px] text-ink-sub mb-1">
+              OCR 原文 (僅老師可見,學生只看圖)
+            </div>
+          )}
+          <div
+            className="text-[14px]"
+            style={{
+              lineHeight: 1.7,
+              color: hasImage ? '#888' : 'var(--ink)',
+              background: hasImage ? '#FAFAF8' : undefined,
+              padding: hasImage ? '8px 10px' : undefined,
+              borderRadius: hasImage ? 8 : undefined,
+              border: hasImage ? '1px dashed var(--line)' : undefined,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {row.question}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-col gap-2 mb-3">
+        {opts.map((o) => {
+          const isCorrect = row.answer === o.L
+          return (
+            <div
+              key={o.L}
+              className="rounded-bubble flex items-center gap-3"
+              style={{
+                padding: '10px 14px',
+                background: isCorrect ? '#E6F1EE' : '#FAFAF8',
+                border: `1px solid ${isCorrect ? '#3B8A7C' : 'var(--line)'}`,
+              }}
+            >
+              <span
+                className="inline-flex items-center justify-center font-semibold shrink-0"
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  background: isCorrect ? '#3B8A7C' : '#F3F1EB',
+                  color: isCorrect ? '#fff' : '#1A1A1A',
+                  fontSize: 13,
+                }}
+              >
+                {isCorrect ? <Check size={14} strokeWidth={3} /> : o.L}
+              </span>
+              <span
+                className="flex-1 text-[14px]"
+                style={{ color: isCorrect ? '#1A1A1A' : '#2a2a2a' }}
+              >
+                {o.text || <span className="text-ink-sub">(空)</span>}
+              </span>
+              {isCorrect && (
+                <span
+                  className="text-[12px] font-medium shrink-0"
+                  style={{ color: '#3B8A7C' }}
+                >
+                  正解
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {row.explanation && (
+        <div
+          className="rounded-bubble p-3 text-[13px]"
+          style={{
+            background: 'var(--subject-english-bg)',
+            lineHeight: 1.7,
+            border: '1px solid #d5e6e0',
+          }}
+        >
+          <span className="text-ink-sub font-medium">解析 · </span>
+          <span style={{ whiteSpace: 'pre-wrap' }}>{row.explanation}</span>
+        </div>
+      )}
+      {!row.answer && (
+        <div
+          className="mt-3 rounded-bubble p-3 text-[13px]"
+          style={{
+            background: 'var(--subject-chinese-bg)',
+            color: '#D14343',
+            border: '1px solid #D14343',
+          }}
+        >
+          ⚠ 此題尚未設定正解
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Stepper modal: flip through all currently filtered questions one by one
+// with the correct answer revealed. Meant for reviewing a whole uploaded
+// booklet end-to-end right after import.
+function ReviewStepperModal({ rows, startIndex, onClose }) {
+  const [index, setIndex] = useState(startIndex || 0)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft')
+        setIndex((i) => Math.max(0, i - 1))
+      else if (e.key === 'ArrowRight')
+        setIndex((i) => Math.min(rows.length - 1, i + 1))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [rows.length, onClose])
+  const row = rows[index]
+  if (!row) return null
+  return (
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-5 overflow-y-auto"
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-card rounded-card w-full max-w-2xl shadow-card my-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="flex items-center justify-between px-6 py-4"
+          style={{ borderBottom: '1px solid var(--line)' }}
+        >
+          <div>
+            <div className="text-[11px] text-ink-sub">審題模式</div>
+            <div className="text-[16px] font-semibold mt-0.5">
+              第 <span className="font-num">{index + 1}</span>
+              <span className="text-ink-sub"> / </span>
+              <span className="font-num">{rows.length}</span> 題
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-bubble p-1 hover:bg-neutral-chip"
+            aria-label="關閉"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-6 pt-4 pb-2">
+          <div className="flex items-center flex-wrap gap-2 mb-1">
+            {row.source_number ? (
+              <span
+                className="rounded-chip font-semibold font-num"
+                style={{
+                  background: '#1A1A1A',
+                  color: '#fff',
+                  fontSize: 11,
+                  padding: '2px 8px',
+                }}
+              >
+                第 {row.source_number} 題
+              </span>
+            ) : null}
+            <SubjectTag subject={row.subject} size="sm" />
+            <Chip>{row.grade} 年級</Chip>
+            {row.unit && <Chip>{row.unit}</Chip>}
+            <Stars value={row.difficulty} max={5} size={11} />
+          </div>
+        </div>
+        <div className="px-6 pb-4 max-h-[60vh] overflow-y-auto">
+          <QuestionReview row={row} />
+        </div>
+        <div
+          className="flex items-center justify-between px-6 py-3"
+          style={{ borderTop: '1px solid var(--line)' }}
+        >
+          <button
+            onClick={() => setIndex(Math.max(0, index - 1))}
+            disabled={index === 0}
+            className="inline-flex items-center gap-1.5 rounded-btn font-medium bg-card border border-line disabled:opacity-40"
+            style={{ padding: '8px 14px', minHeight: 40, fontSize: 13 }}
+          >
+            <ArrowLeft size={14} />
+            上一題
+          </button>
+          <div className="text-[11px] text-ink-sub hidden sm:block">
+            ← → 可切換
+          </div>
+          <button
+            onClick={() => setIndex(Math.min(rows.length - 1, index + 1))}
+            disabled={index >= rows.length - 1}
+            className="inline-flex items-center gap-1.5 rounded-btn font-medium disabled:opacity-40"
+            style={{
+              padding: '8px 14px',
+              minHeight: 40,
+              fontSize: 13,
+              background: '#1A1A1A',
+              color: '#fff',
+            }}
+          >
+            下一題
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

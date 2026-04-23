@@ -35,6 +35,7 @@ export async function parseFile(file) {
   const type = file.type || ''
   const subjectHint = detectSubjectFromName(file.name || '')
   const gradeHint = detectGradeFromName(file.name || '')
+  const unitHint = deriveBookNameFromFilename(file.name || '')
 
   let rows
   if (name.endsWith('.json') || type === 'application/json') {
@@ -52,7 +53,7 @@ export async function parseFile(file) {
     throw new Error(`不支援的檔案格式(${type || '.' + name.split('.').pop()})`)
   }
 
-  return { questions: rows.map((r) => normalize(r, subjectHint, gradeHint)) }
+  return { questions: rows.map((r) => normalize(r, subjectHint, gradeHint, unitHint)) }
 }
 
 // =============================================================
@@ -737,7 +738,7 @@ function answerMapFromRows(rows) {
 // Normalisation + validation
 // =============================================================
 
-function normalize(raw, subjectHint, gradeHint) {
+function normalize(raw, subjectHint, gradeHint, unitHint) {
   const subjectKey = raw.subject
   const subject =
     SUBJECT_MAP[subjectKey] ||
@@ -770,7 +771,7 @@ function normalize(raw, subjectHint, gradeHint) {
     source_number: raw.source_number || null,
     subject,
     grade: parseInt(raw.grade, 10) || gradeHint || 0,
-    unit: (raw.unit || '').trim() || null,
+    unit: (raw.unit || '').trim() || unitHint || null,
     difficulty: parseInt(raw.difficulty, 10) || 2,
     question,
     option_a: opt('a', 1),
@@ -780,6 +781,19 @@ function normalize(raw, subjectHint, gradeHint) {
     answer,
     explanation: (raw.explanation || '').trim() || null,
   }
+}
+
+// Turn the uploaded filename into a reasonable "book name" used as a unit
+// fallback when individual questions don't carry one. Strips the file
+// extension and a trailing "(N)" copy-suffix. Example:
+//   "113年縣市學生學習能力檢測三年級數學科題本(1).pdf"
+//   → "113年縣市學生學習能力檢測三年級數學科題本"
+function deriveBookNameFromFilename(name) {
+  if (!name) return null
+  let base = name.replace(/\.[^.]+$/, '')
+  base = base.replace(/\s*[\(（]\d+[\)）]\s*$/, '')
+  base = base.trim()
+  return base || null
 }
 
 export function validateQuestions(list) {
