@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { GraduationCap, LayoutDashboard, FileText, Users, Globe, Settings, LogOut } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
 import Avatar from './Avatar.jsx'
@@ -20,8 +20,9 @@ export default function TeacherShell({ children }) {
         className="w-[220px] shrink-0 bg-card flex flex-col"
         style={{ borderRight: '1px solid var(--line)' }}
       >
-        <div
-          className="flex items-center gap-2 px-4 py-4"
+        <Link
+          to="/teacher"
+          className="flex items-center gap-2 px-4 py-4 hover:bg-neutral-chip"
           style={{ borderBottom: '1px solid var(--line)' }}
         >
           <span
@@ -31,7 +32,7 @@ export default function TeacherShell({ children }) {
             <GraduationCap size={18} strokeWidth={2.25} />
           </span>
           <span className="font-semibold text-[15px] text-ink">練習題庫</span>
-        </div>
+        </Link>
         <nav className="px-3 py-4 flex flex-col gap-1 flex-1">
           {NAV.map((item) => {
             const IconCmp = item.icon
