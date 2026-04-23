@@ -1,10 +1,9 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { GraduationCap, LayoutDashboard, FileText, Users, Globe, Settings, LogOut, PlayCircle } from 'lucide-react'
+import { GraduationCap, LayoutDashboard, FileText, Users, Globe, Settings, LogOut } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
 import Avatar from './Avatar.jsx'
 
 const NAV = [
-  { to: '/practice', icon: PlayCircle, label: '練習', end: true },
   { to: '/teacher', icon: LayoutDashboard, label: '班級', end: true },
   { to: '/teacher/questions', icon: FileText, label: '題庫' },
   { to: '/teacher/students', icon: Users, label: '學生', disabled: true },

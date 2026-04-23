@@ -32,10 +32,9 @@ export default function Result() {
 
   useEffect(() => {
     if (!st) {
-      navigate('/practice', { replace: true })
+      navigate('/student', { replace: true })
       return
     }
-    if (st.previewMode) return // teacher preview: skip daily goal fetch
     api
       .get('/api/student/home')
       .then((d) => setGoal({ after: d.dailyDone, total: d.student.daily_goal }))
@@ -182,7 +181,7 @@ export default function Result() {
 
       <div className="flex flex-col gap-3">
         <button
-          onClick={() => navigate('/practice', { replace: true })}
+          onClick={() => navigate(`/student/quiz/${subject}`, { replace: true })}
           className="w-full inline-flex items-center justify-center gap-2 rounded-btn text-white font-semibold"
           style={{ minHeight: 56, background: s.color, fontSize: 16 }}
         >
@@ -199,7 +198,7 @@ export default function Result() {
             練錯題
           </button>
           <button
-            onClick={() => navigate('/practice')}
+            onClick={() => navigate('/student')}
             className="inline-flex items-center justify-center gap-2 rounded-btn bg-card border border-line font-medium"
             style={{ minHeight: 56, fontSize: 15 }}
           >
