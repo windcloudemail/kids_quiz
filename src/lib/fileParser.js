@@ -259,11 +259,16 @@ async function parsePDF(file) {
   const withLoc = extractTrailingMarkerStyleWithLoc(richLines)
   const plain = extractLeadingMarkerStyle(rawText)
 
-  // Merge both styles by source_number: prefer withLoc (carries _loc so the
-  // question image can be cropped from the rendered page), fill any gaps
-  // with plain-style entries. This avoids the old either/or that dropped
-  // images whenever leading-style happened to detect one more question
-  // than trailing-style.
+  // Collect y-location of every question header by scanning richLines
+  // directly. This is the source of truth for image cropping — neither
+  // parser covers every PDF layout, but the header line is easy to spot
+  // (starts with "N." or "N、"). It also gives us the natural slice
+  // boundaries (from this header's y down to the next header's y).
+  const headerLocs = buildHeaderLocs(richLines)
+
+  // Merge withLoc (preferred — may already carry _loc and options) with
+  // plain (leading-marker) output per source_number. The withLoc entry
+  // keeps its _loc; any missing options/answer get filled from plain.
   const byNum = new Map()
   const unnumbered = []
   for (const q of withLoc) {
@@ -271,8 +276,24 @@ async function parsePDF(file) {
     else unnumbered.push(q)
   }
   for (const q of plain) {
-    if (q.source_number && !byNum.has(q.source_number)) byNum.set(q.source_number, q)
-    else if (!q.source_number) unnumbered.push(q)
+    if (!q.source_number) {
+      unnumbered.push(q)
+      continue
+    }
+    const existing = byNum.get(q.source_number)
+    if (!existing) {
+      byNum.set(q.source_number, q)
+      continue
+    }
+    if (!existing.option_a && q.option_a) existing.option_a = q.option_a
+    if (!existing.option_b && q.option_b) existing.option_b = q.option_b
+    if (!existing.option_c && q.option_c) existing.option_c = q.option_c
+    if (!existing.option_d && q.option_d) existing.option_d = q.option_d
+    if (!existing.answer && q.answer) existing.answer = q.answer
+    if (!existing.explanation && q.explanation) existing.explanation = q.explanation
+    if (q.question && q.question.length > (existing.question || '').length) {
+      existing.question = q.question
+    }
   }
   const merged = [
     ...[...byNum.values()].sort(
@@ -280,27 +301,48 @@ async function parsePDF(file) {
     ),
     ...unnumbered,
   ]
-  // Try to locate plain-style entries (which have no _loc) by scanning
-  // rich lines for a matching question header, so they get images too.
+
+  // Attach _loc to any question that lacks one, using the header-loc map.
   for (const q of merged) {
     if (q._loc || !q.source_number) continue
-    const headerRe = new RegExp(`^${q.source_number}\\.\\s`)
-    const hit = richLines.find((l) => headerRe.test(l.text))
-    if (hit) {
-      const nextHit = richLines.find(
-        (l) =>
-          l.pageIndex === hit.pageIndex &&
-          l.y < hit.y &&
-          /^\d+\.\s/.test(l.text)
-      )
-      q._loc = {
-        pageIndex: hit.pageIndex,
-        yStart: hit.y,
-        yEnd: nextHit ? nextHit.y : null,
-      }
-    }
+    const loc = headerLocs.get(q.source_number)
+    if (loc) q._loc = loc
   }
   return attachImagesToQuestions(merged, pages)
+}
+
+// Scan all rich lines and produce a Map<source_number, {pageIndex, yStart,
+// yEnd}> keyed by the question number. yEnd is the y of the next
+// header on the same page (or null if this is the page's last question,
+// meaning the slice should run to the bottom of the page). Accepts
+// headers in either "N. " or "N、" format, with or without a trailing space.
+function buildHeaderLocs(richLines) {
+  const headerRe = /^(\d+)[\.\uFF0E、]\s*/
+  const hits = []
+  for (let i = 0; i < richLines.length; i++) {
+    const m = richLines[i].text.match(headerRe)
+    if (!m) continue
+    const n = parseInt(m[1], 10)
+    if (!(n >= 1 && n <= 999)) continue
+    hits.push({ n, pageIndex: richLines[i].pageIndex, y: richLines[i].y })
+  }
+  const locs = new Map()
+  for (let i = 0; i < hits.length; i++) {
+    const h = hits[i]
+    // Next same-page header is our yEnd; null means "to bottom of page".
+    let yEnd = null
+    for (let j = i + 1; j < hits.length; j++) {
+      if (hits[j].pageIndex === h.pageIndex) {
+        yEnd = hits[j].y
+        break
+      }
+      if (hits[j].pageIndex > h.pageIndex) break
+    }
+    if (!locs.has(h.n)) {
+      locs.set(h.n, { pageIndex: h.pageIndex, yStart: h.y, yEnd })
+    }
+  }
+  return locs
 }
 
 function extractTrailingMarkerStyleWithLoc(richLines) {
@@ -345,7 +387,7 @@ function extractTrailingMarkerStyleWithLoc(richLines) {
   for (const line of richLines) {
     if (/請繼續作答/.test(line.text)) continue
 
-    const qStart = line.text.match(/^(\d+)\.\s*(.*)$/)
+    const qStart = line.text.match(/^(\d+)[\.\uFF0E、]\s*(.*)$/)
     if (qStart) {
       flush({ pageIndex: line.pageIndex, y: line.y })
       current = {
@@ -627,7 +669,7 @@ function extractTrailingMarkerStyle(rawText) {
   for (const line of lines) {
     if (/請繼續作答/.test(line)) continue
 
-    const qStart = line.match(/^(\d+)\.\s*(.*)$/)
+    const qStart = line.match(/^(\d+)[\.\uFF0E、]\s*(.*)$/)
     if (qStart) {
       flush()
       current = { n: parseInt(qStart[1], 10), question: qStart[2] || '' }

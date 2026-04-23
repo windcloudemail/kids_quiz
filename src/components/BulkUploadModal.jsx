@@ -226,9 +226,17 @@ export default function BulkUploadModal({ onClose, onSaved }) {
               <div className="text-[14px]">
                 <span className="text-ink-sub">{questionFileName}</span> · 抓到{' '}
                 <span className="font-semibold">{questions.length}</span> 題
+                {questions.some((q) => q.image_data_url) && (
+                  <span className="text-ink-sub">
+                    {' · '}
+                    <span style={{ color: '#3B8A7C' }}>
+                      {questions.filter((q) => q.image_data_url).length} 題附圖
+                    </span>
+                  </span>
+                )}
                 {validCount !== questions.length && (
                   <span className="text-ink-sub">
-                    (
+                    {' ('}
                     <span style={{ color: '#3B8A7C' }}>{validCount} 可用</span>
                     {' / '}
                     <span style={{ color: '#D14343' }}>
