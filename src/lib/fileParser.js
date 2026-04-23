@@ -621,6 +621,23 @@ function extractLeadingOptions(text) {
       o4: o4.replace(/。$/, '').trim(),
     }
   }
+  // Taiwan official exam style: bare numeric markers "1 text 2 text 3 text
+  // 4 text". The first "1" must sit at a line start (after \n or very
+  // beginning) so we don't latch onto e.g. "第 1 籃" inside the question
+  // text. Subsequent markers 2/3/4 can appear on the same line (options
+  // packed inline) or after a newline (options one per line).
+  const bareRe = /(?:^|\n)\s*1\s+([\s\S]+?)\s+2\s+([\s\S]+?)\s+3\s+([\s\S]+?)\s+4\s+([\s\S]+)$/
+  const m = text.match(bareRe)
+  if (m) {
+    return {
+      q: text.substring(0, m.index).trim(),
+      qp2: '',
+      o1: m[1].trim(),
+      o2: m[2].trim(),
+      o3: m[3].trim(),
+      o4: m[4].trim(),
+    }
+  }
   return null
 }
 
@@ -843,7 +860,7 @@ function normalize(raw, subjectHint, gradeHint, unitHint) {
     return String(v || '').trim()
   }
 
-  const questionMain = String(raw.question || '').trim()
+  const questionMain = cleanQuestionTrailer(String(raw.question || '').trim())
   const questionPart2 = String(raw.question_part2 || '').trim()
   const question = [questionMain, questionPart2].filter(Boolean).join(' ')
 
@@ -861,6 +878,21 @@ function normalize(raw, subjectHint, gradeHint, unitHint) {
     answer,
     explanation: (raw.explanation || '').trim() || null,
   }
+}
+
+// When a PDF question includes a figure or table, pdf.js dumps all cells /
+// labels into the text stream after the question's "？". Before the parser
+// understood bare-digit option markers this garbage ran into the options
+// and broke them; now that options are matched reliably, we still want to
+// cut the visible noise off of the question text itself so students don't
+// see "容器 水壺 杯子..." appended to "還剩下多少毫升的紅茶？".
+// Heuristic: the first "？" or "?" in a Taiwan-style question is reliably
+// the real end of the question. Truncate everything after it.
+function cleanQuestionTrailer(text) {
+  if (!text) return text
+  const m = text.match(/[?？]/)
+  if (!m) return text
+  return text.substring(0, m.index + 1).trim()
 }
 
 // Turn the uploaded filename into a reasonable "book name" used as a unit
