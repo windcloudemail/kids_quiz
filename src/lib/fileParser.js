@@ -317,24 +317,45 @@ async function parsePDF(file) {
 // yEnd < y < yStart. Recognises bare-digit "1 ..." and bracketed "(1)" /
 // "①" marker styles.
 function findFirstOptionY(richLines, pageIndex, yStart, yEnd) {
-  // Matches the option-1 marker in any of the formats we parse:
-  //   "1 裝滿 6 個水壺"         bare digit + whitespace
-  //   "13 2 18 3 1140 4 1146"  glued digit (Q21 edge case)
-  //   "① 裝滿 6 個水壺"         circled
-  //   "(1) 裝滿..." / "（1）..." bracketed
-  const optionOneRe = /^\s*(?:1[\s\d]|①|\(1\)|（1）)/
-  let bestY = null
+  // Return the y of the option-1 row for this question, so the image slice
+  // can end right above the options (not below them).
+  //
+  // Matching on option-1 alone is too permissive — a number-line ("0 1 2 3
+  // 4 5 6 7 8 9"), a scale ("100 150 200"), or a fraction like "13 / 8 盒"
+  // all contain a standalone "1". So we look for a plausible *quadruple*
+  // (marker-1 above marker-2 above marker-3 above marker-4, each gap
+  // under ~80 pts) and return the smallest-y quadruple's marker-1 y — that
+  // corresponds to the LAST marker cluster before the page footer, which
+  // is the real options block.
+  const circled = ['①', '②', '③', '④']
+  const markerRe = (n) =>
+    new RegExp(
+      `^\\s*${n}[\\s\\d]|^\\s*\\(${n}\\)|^\\s*（${n}）|(?:^|[^0-9])${n}\\s*$`
+    )
+  const buckets = { 1: [], 2: [], 3: [], 4: [] }
   for (const l of richLines) {
     if (l.pageIndex !== pageIndex) continue
     if (l.y >= yStart) continue
     if (yEnd !== null && l.y <= yEnd) continue
-    if (!optionOneRe.test(l.text)) continue
-    // Pick the HIGHEST y (closest below yStart) — that's where options
-    // actually begin; anything lower is a continuation line or the page
-    // footer.
-    if (bestY === null || l.y > bestY) bestY = l.y
+    for (let n = 1; n <= 4; n++) {
+      if (markerRe(n).test(l.text) || l.text.includes(circled[n - 1])) {
+        buckets[n].push(l.y)
+      }
+    }
   }
-  return bestY
+  if (!buckets[1].length || !buckets[2].length || !buckets[3].length || !buckets[4].length) return null
+  const MAX_GAP = 80
+  const y1s = [...buckets[1]].sort((a, b) => a - b)
+  for (const y1 of y1s) {
+    const y2 = buckets[2].find((y) => y < y1 && y1 - y < MAX_GAP)
+    if (y2 == null) continue
+    const y3 = buckets[3].find((y) => y < y2 && y2 - y < MAX_GAP)
+    if (y3 == null) continue
+    const y4 = buckets[4].find((y) => y < y3 && y3 - y < MAX_GAP)
+    if (y4 == null) continue
+    return y1
+  }
+  return null
 }
 
 // Scan all rich lines and produce a Map<source_number, {pageIndex, yStart,
@@ -473,14 +494,23 @@ function attachImagesToQuestions(questions, pages, richLines) {
     const effectiveYEnd = firstOptY !== null ? firstOptY : loc.yEnd
 
     // PDF y is bottom-up, canvas y is top-down.
-    // Text y is the baseline of the line, so top-of-line ≈ y + font size (~12pt).
-    // Add a small padding around the crop so we don't clip glyphs.
-    const padTop = 18
-    const padBottom = 4
+    // Text y is the baseline of the line; glyphs extend ~ascent pts above
+    // baseline and ~descent pts below. For 12pt Chinese body text that's
+    // roughly 10 pt above and 3 pt below.
+    //
+    // topPx must sit ABOVE the first question line's ascent — anything less
+    // clips the top of "10." or the first glyph.
+    // bottomPx depends on whether effectiveYEnd came from findFirstOptionY
+    // (the option row's baseline, which we want to EXCLUDE from the slice)
+    // or from loc.yEnd (next question's baseline, which we want to stay
+    // well above). Either way we shift UP by ~ascent to avoid including
+    // the next element's glyph tops.
+    const padTop = 24
+    const padBottom = 22
     const topPx = Math.max(0, Math.floor(h - loc.yStart * scale) - padTop)
     const bottomPx =
       effectiveYEnd != null
-        ? Math.min(h, Math.ceil(h - effectiveYEnd * scale) + padBottom)
+        ? Math.max(topPx + 40, Math.floor(h - effectiveYEnd * scale) - padBottom)
         : h
     const sliceH = bottomPx - topPx
     // Pure text-only questions (e.g. 哥哥想買遊戲機…) produce a tight

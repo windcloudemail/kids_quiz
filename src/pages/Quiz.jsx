@@ -51,6 +51,7 @@ export default function Quiz() {
   const [selected, setSelected] = useState(null)
   const [revealed, setRevealed] = useState(false)
   const [attempts, setAttempts] = useState([])
+  const [zoomedImg, setZoomedImg] = useState(null)
   const startTimeRef = useRef(Date.now())
   const questionStartRef = useRef(Date.now())
   const submittingRef = useRef(false)
@@ -192,7 +193,7 @@ export default function Quiz() {
       </div>
 
       <div className="flex-1">
-        <div className="mx-auto max-w-md px-5 pb-32">
+        <div className="mx-auto max-w-md px-5 pb-44">
           <div className="bg-card rounded-card border border-line shadow-card p-5 mb-5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[14px] font-semibold font-num" style={{ color: s.color }}>
@@ -206,11 +207,13 @@ export default function Quiz() {
               <img
                 src={q.image_url}
                 alt={`第 ${idx + 1} 題`}
+                onClick={() => setZoomedImg(q.image_url)}
                 style={{
                   width: '100%',
                   height: 'auto',
                   borderRadius: 8,
                   border: '1px solid var(--line-soft)',
+                  cursor: 'zoom-in',
                 }}
               />
             ) : q.zhuyin?.length ? (
@@ -322,6 +325,20 @@ export default function Quiz() {
           )}
         </div>
       </div>
+
+      {zoomedImg && (
+        <div
+          onClick={() => setZoomedImg(null)}
+          className="fixed inset-0 z-30 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.85)', cursor: 'zoom-out' }}
+        >
+          <img
+            src={zoomedImg}
+            alt="題目放大"
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -359,8 +376,8 @@ function OptionButton({ letter, text, state, color, onClick }) {
       disabled={state === 'correct' || state === 'wrong'}
       className="w-full flex items-center gap-3 rounded-option text-left"
       style={{
-        minHeight: 64,
-        padding: '12px 16px 12px 12px',
+        minHeight: 52,
+        padding: '10px 14px 10px 10px',
         background: styles.bg,
         border: `2px solid ${styles.border}`,
         transition: 'all 0.15s ease',
@@ -369,23 +386,23 @@ function OptionButton({ letter, text, state, color, onClick }) {
       <span
         className="inline-flex items-center justify-center font-semibold shrink-0"
         style={{
-          width: 36,
-          height: 36,
+          width: 30,
+          height: 30,
           borderRadius: '50%',
           background: styles.circleBg,
           color: styles.circleFg,
-          fontSize: 14,
+          fontSize: 13,
         }}
       >
         {state === 'correct' ? (
-          <Check size={18} strokeWidth={3} />
+          <Check size={16} strokeWidth={3} />
         ) : state === 'wrong' ? (
-          <X size={18} strokeWidth={3} />
+          <X size={16} strokeWidth={3} />
         ) : (
           letter
         )}
       </span>
-      <span style={{ fontSize: 16, lineHeight: 1.5 }}>{text}</span>
+      <span style={{ fontSize: 15, lineHeight: 1.5 }}>{text}</span>
     </button>
   )
 }
