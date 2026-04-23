@@ -316,22 +316,21 @@ async function parsePDF(file) {
 // stay out of the picture. PDF y is bottom-up so "between" means
 // yEnd < y < yStart. Recognises bare-digit "1 ..." and bracketed "(1)" /
 // "①" marker styles.
-function findFirstOptionY(richLines, pageIndex, yStart, yEnd) {
-  // Return the y of the option-1 row for this question, so the image slice
-  // can end right above the options (not below them).
-  //
-  // Matching on option-1 alone is too permissive — a number-line ("0 1 2 3
-  // 4 5 6 7 8 9"), a scale ("100 150 200"), or a fraction like "13 / 8 盒"
-  // all contain a standalone "1". So we look for a plausible *quadruple*
-  // (marker-1 above marker-2 above marker-3 above marker-4, each gap
-  // under ~80 pts) and return the smallest-y quadruple's marker-1 y — that
-  // corresponds to the LAST marker cluster before the page footer, which
-  // is the real options block.
+function findOptionQuad(richLines, pageIndex, yStart, yEnd) {
+  // Return {y1, y4} for the options row of this question, where y1 is the
+  // option-1 baseline and y4 the option-4 baseline. The quad is found by
+  // looking for a monotonically decreasing (1,2,3,4) marker sequence with
+  // each gap <80 pts — this rejects decoys like number-line "0 1 2 3 4 5",
+  // scales "100 150 200" or fractions "13 / 8 盒" whose fragments would
+  // match a single marker in isolation. We pick the LOWEST valid quad
+  // (smallest y1) so we land on the actual options row nearest the page
+  // footer, not some decoy higher up.
   const circled = ['①', '②', '③', '④']
+  // Trailing digit match is deliberately permissive (even after another
+  // digit, e.g. "31" = text "3" + marker "1"): the 1→2→3→4 quad check
+  // below rejects false positives from scale labels, page numbers, etc.
   const markerRe = (n) =>
-    new RegExp(
-      `^\\s*${n}[\\s\\d]|^\\s*\\(${n}\\)|^\\s*（${n}）|(?:^|[^0-9])${n}\\s*$`
-    )
+    new RegExp(`^\\s*${n}[\\s\\d]|^\\s*\\(${n}\\)|^\\s*（${n}）|${n}\\s*$`)
   const buckets = { 1: [], 2: [], 3: [], 4: [] }
   for (const l of richLines) {
     if (l.pageIndex !== pageIndex) continue
@@ -353,7 +352,7 @@ function findFirstOptionY(richLines, pageIndex, yStart, yEnd) {
     if (y3 == null) continue
     const y4 = buckets[4].find((y) => y < y3 && y3 - y < MAX_GAP)
     if (y4 == null) continue
-    return y1
+    return { y1, y4 }
   }
   return null
 }
@@ -482,35 +481,26 @@ function attachImagesToQuestions(questions, pages, richLines) {
     const scale = viewport.scale
     const h = viewport.height
 
-    // Tighten yEnd to the first option marker's y so the options and the
-    // page footer ("請繼續作答!" / page number) don't end up inside the
-    // image. Without this, every cropped question shows ①②③④ inside
-    // the image AND again as A/B/C/D below — a useless duplication for
-    // text-only questions and a messy extra band for questions with a
-    // real figure.
-    const firstOptY = richLines
-      ? findFirstOptionY(richLines, loc.pageIndex, loc.yStart, loc.yEnd)
-      : null
-    const effectiveYEnd = firstOptY !== null ? firstOptY : loc.yEnd
-
-    // PDF y is bottom-up, canvas y is top-down.
-    // Text y is the baseline of the line; glyphs extend ~ascent pts above
-    // baseline and ~descent pts below. For 12pt Chinese body text that's
-    // roughly 10 pt above and 3 pt below.
+    // Slice bottom: include the FULL options row, all the way down to
+    // option 4's baseline plus descent. The student reads the options
+    // directly from the image, which is more reliable than our OCR of
+    // multi-line fraction layouts like "13/8 盒" that pdfjs splits across
+    // 3 separate text items with interleaved y values.
     //
-    // topPx must sit ABOVE the first question line's ascent — anything less
-    // clips the top of "10." or the first glyph.
-    // bottomPx depends on whether effectiveYEnd came from findFirstOptionY
-    // (the option row's baseline, which we want to EXCLUDE from the slice)
-    // or from loc.yEnd (next question's baseline, which we want to stay
-    // well above). Either way we shift UP by ~ascent to avoid including
-    // the next element's glyph tops.
+    // If we can't find a valid (1,2,3,4) quad, fall back to loc.yEnd
+    // (next question's baseline) and stay WELL above its ascender.
+    const quad = richLines
+      ? findOptionQuad(richLines, loc.pageIndex, loc.yStart, loc.yEnd)
+      : null
+
     const padTop = 24
-    const padBottom = 22
+    const padTextExclude = 22 // stay above next-question ascender
+    const padBelowOption4 = 14 // include option-4 descender + margin
     const topPx = Math.max(0, Math.floor(h - loc.yStart * scale) - padTop)
-    const bottomPx =
-      effectiveYEnd != null
-        ? Math.max(topPx + 40, Math.floor(h - effectiveYEnd * scale) - padBottom)
+    const bottomPx = quad
+      ? Math.min(h, Math.floor(h - quad.y4 * scale) + padBelowOption4)
+      : loc.yEnd != null
+        ? Math.max(topPx + 40, Math.floor(h - loc.yEnd * scale) - padTextExclude)
         : h
     const sliceH = bottomPx - topPx
     // Pure text-only questions (e.g. 哥哥想買遊戲機…) produce a tight

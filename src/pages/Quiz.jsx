@@ -193,7 +193,7 @@ export default function Quiz() {
       </div>
 
       <div className="flex-1">
-        <div className="mx-auto max-w-md px-5 pb-44">
+        <div className="mx-auto max-w-md px-5 pb-56">
           <div className="bg-card rounded-card border border-line shadow-card p-5 mb-5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[14px] font-semibold font-num" style={{ color: s.color }}>
@@ -239,6 +239,7 @@ export default function Quiz() {
                   key={letter}
                   letter={letter}
                   text={opt.text}
+                  hideText={!!q.image_url}
                   state={state}
                   color={s.color}
                   onClick={() => !revealed && setSelected(letter)}
@@ -343,7 +344,7 @@ export default function Quiz() {
   )
 }
 
-function OptionButton({ letter, text, state, color, onClick }) {
+function OptionButton({ letter, text, hideText, state, color, onClick }) {
   const styles = {
     default: {
       bg: '#fff',
@@ -402,7 +403,7 @@ function OptionButton({ letter, text, state, color, onClick }) {
           letter
         )}
       </span>
-      <span style={{ fontSize: 15, lineHeight: 1.5 }}>{text}</span>
+      {!hideText && <span style={{ fontSize: 15, lineHeight: 1.5 }}>{text}</span>}
     </button>
   )
 }
