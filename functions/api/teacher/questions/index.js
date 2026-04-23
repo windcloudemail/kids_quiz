@@ -9,7 +9,10 @@ export async function onRequestGet({ request, env, data }) {
   const difficulty = url.searchParams.get('difficulty')
   const q = url.searchParams.get('q')
 
-  let sql = `SELECT id, owner_teacher_id, source_number, subject, grade, unit, difficulty, question, image_url, used_count,
+  let sql = `SELECT id, owner_teacher_id, source_number, subject, grade, unit, difficulty,
+                    question, image_url,
+                    option_a, option_b, option_c, option_d, answer, explanation,
+                    used_count,
                     (SELECT CASE WHEN COUNT(*) > 0
                             THEN ROUND(SUM(sa.correct) * 100.0 / COUNT(*))
                             ELSE 0 END
